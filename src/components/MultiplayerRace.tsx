@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 const MOVEMENT_THRESHOLD = 0.02;
-const DEFAULT_TIME_LIMIT = 120; // 2 minutes in seconds
+const DEFAULT_TIME_LIMIT = 120;
 
 interface Player {
   id: string;
@@ -15,53 +15,6 @@ interface Player {
   currency?: number;
 }
 
-interface Upgrade {
-  id: string;
-  name: string;
-  description: string;
-  cost: number;
-  multiplier: number;
-  image?: string;
-}
-
-interface Bird {
-  x: number;
-  y: number;
-  velocity: number;
-  rotation: number;
-}
-
-interface Pipe {
-  x: number;
-  topHeight: number;
-  bottomY: number;
-  passed: boolean;
-}
-
-interface GameState {
-  bird: Bird;
-  pipes: Pipe[];
-  score: number;
-  gameOver: boolean;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  size: number;
-}
-
-const UPGRADES: Upgrade[] = [
-  { id: 'lebron', name: '👑 Lebron Poster', description: '+1 score multiplier', cost: 10, multiplier: 1, image: 'https://a.espncdn.com/i/headshots/nba/players/full/1966.png' },
-  { id: 'lotion', name: '🧴 Premium Lotion', description: '+2 score multiplier', cost: 50, multiplier: 2 },
-  { id: 'vr', name: '🥽 VR Headset', description: '+5 score multiplier', cost: 200, multiplier: 5 },
-  { id: 'ai', name: '🤖 AI Girlfriend', description: '+10 score multiplier', cost: 500, multiplier: 10 },
-  { id: 'lab', name: '🧪 Gene Therapy', description: '+25 score multiplier', cost: 2000, multiplier: 25 },
-];
-
 export default function MultiplayerRace() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameState, setGameState] = useState<'menu' | 'lobby' | 'racing' | 'winner'>('menu');
@@ -70,58 +23,35 @@ export default function MultiplayerRace() {
   const [myPlayerId, setMyPlayerId] = useState('');
   const [players, setPlayers] = useState<Player[]>([]);
   const [localScore, setLocalScore] = useState(0);
-  const [currency, setCurrency] = useState(0);
-  const [multiplier, setMultiplier] = useState(1);
-  const [ownedUpgrades, setOwnedUpgrades] = useState<string[]>([]);
-  const [showShop, setShowShop] = useState(false);
   const [error, setError] = useState('');
   const [winner, setWinner] = useState<Player | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
-  const [particles, setParticles] = useState<Particle[]>([]);
   const [timeLimit, setTimeLimit] = useState(DEFAULT_TIME_LIMIT);
   const [timeRemaining, setTimeRemaining] = useState(DEFAULT_TIME_LIMIT);
-  const [gameStartTime, setGameStartTime] = useState<number | null>(null);
-  const [streak, setStreak] = useState(0);
-  const [comboMultiplier, setComboMultiplier] = useState(1);
-  const [opponentStream, setOpponentStream] = useState<MediaStream | null>(null);
   
-  // Flappy Bird game state
-  const [myGameState, setMyGameState] = useState<GameState>({
-    bird: { x: 100, y: 300, velocity: 0, rotation: 0 },
-    pipes: [],
-    score: 0,
-    gameOver: false
-  });
-  const [opponentGameState, setOpponentGameState] = useState<GameState>({
-    bird: { x: 100, y: 300, velocity: 0, rotation: 0 },
-    pipes: [],
-    score: 0,
-    gameOver: false
-  });
-  const [showFace, setShowFace] = useState(false);
-  
-  const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
+  const gameCanvasRef = useRef<HTMLCanvasElement>(null);
+  const webcamVideoRef = useRef<HTMLVideoElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const opponentVideoRef = useRef<HTMLVideoElement>(null);
   const handLandmarkerRef = useRef<any>(null);
   const lastHandYRef = useRef<number | null>(null);
-  const stateRef = useRef<'idle' | 'moving_up' | 'moving_down'>('idle');
   const animationFrameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const roomCodeRef = useRef<string>('');
-  const lastStrokeTimeRef = useRef<number>(0);
-  const particlesRef = useRef<Particle[]>([]);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const streakTimerRef = useRef<NodeJS.Timeout | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize Socket.io (only once)
+  // Flappy Bird game state
+  const birdYRef = useRef(300);
+  const birdVelocityRef = useRef(0);
+  const pipesRef = useRef<Array<{ x: number; topHeight: number; gap: number; passed: boolean }>>([]);
+  const gameOverRef = useRef(false);
+
+  // Initialize Socket.io
   useEffect(() => {
     console.log('Connecting to server at:', window.location.origin);
     const newSocket = io(window.location.origin, {
-      transports: ['polling'] // Force polling only for Vercel compatibility
+      transports: ['polling']
     });
     
     newSocket.on('connect', () => {
@@ -133,6 +63,20 @@ export default function MultiplayerRace() {
       console.error('Socket connection error:', error);
       setError('Failed to connect to server');
     });
+
+    newSocket.on('room-created', ({ roomCode, playerId }) => {
+      console.log('Room created:', roomCode);
+      setRoomCode(roomCode);
+      roomCodeRef.current = roomCode;
+      setMyPlayerId(playerId);
+      setGameState('lobby');
+    });
+
+    newSocket.on('player-joined', ({ players: updatedPlayers, roomCode: joinedRoomCode }) => {
+      console.log('Player joined:', updatedPlayers);
+      setPlayers(updatedPlayers);
+      setRoomCode(joinedRoomCode);
+      roomCodeRef.current = joinedRoomCode;
     
     setSocket(newSocket);
     socketRef.current = newSocket;

@@ -1,0 +1,2355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fappy Bird - 3D</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: linear-gradient(to bottom, #4a90e2 0%, #87CEEB 50%, #ffd4a3 100%);
+        }
+
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+
+        #score {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 3px 3px 0px #000;
+        }
+
+
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+
+        #gameOverScreen {
+            display: none;
+        }
+        
+        #deathGif {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60vw;
+            height: auto;
+            z-index: 1000;
+        }
+        
+        #dangerOverlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url('https://i.makeagif.com/media/4-14-2024/JAYpad.gif');
+            background-size: cover;
+            background-position: center;
+            opacity: 0.1;
+            pointer-events: none;
+            z-index: 5;
+            transition: opacity 0.1s ease;
+        }
+        
+        #captchaOverlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 2000;
+            pointer-events: auto;
+        }
+        
+        #captchaBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 5px solid #ff00ff;
+            border-radius: 20px;
+            padding: 40px;
+            min-width: 500px;
+            box-shadow: 0 0 50px rgba(255, 0, 255, 0.5);
+            animation: shake 0.5s infinite;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translate(-50%, -50%) rotate(0deg); }
+            25% { transform: translate(-50%, -50%) rotate(0.5deg); }
+            75% { transform: translate(-50%, -50%) rotate(-0.5deg); }
+        }
+        
+        #captchaBox h2 {
+            color: #ffff00;
+            font-size: 32px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px #000;
+            text-align: center;
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        #captchaQuestion {
+            color: #fff;
+            font-size: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+        }
+        
+        .captcha-option {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            font-size: 18px;
+            font-weight: bold;
+            background: linear-gradient(45deg, #ff6b6b, #ff0080);
+            color: white;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            pointer-events: auto;
+        }
+        
+        .captcha-option:hover {
+            transform: scale(1.05);
+            background: linear-gradient(45deg, #00ff00, #00ff80);
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.8);
+        }
+        
+        #captchaWarning {
+            color: #ff0000;
+            font-size: 14px;
+            margin-top: 15px;
+            text-align: center;
+            font-style: italic;
+        }
+        
+        #imageAdOverlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            pointer-events: auto;
+        }
+        
+        #imageAdBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #000;
+            border: 3px solid #ff0000;
+            max-width: 80vw;
+            max-height: 80vh;
+        }
+        
+        #imageAdBox img {
+            display: block;
+            max-width: 100%;
+            max-height: 80vh;
+        }
+        
+        #closeAdButton {
+            position: absolute;
+            top: -15px;
+            right: -15px;
+            width: 40px;
+            height: 40px;
+            background: #ff0000;
+            color: white;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.1s;
+            z-index: 10;
+        }
+        
+        #closeAdButton:hover {
+            background: #ff3333;
+            transform: scale(1.1);
+        }
+        
+        #closeAdButton.running {
+            transition: all 0.05s;
+        }
+        
+        #goyslopMaxButton {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 40px 60px;
+            background: linear-gradient(45deg, #ff0000, #00ff00, #0000ff, #ffff00, #ff00ff);
+            background-size: 400% 400%;
+            animation: goyslopGradient 2s ease infinite, goyslopPulse 1s ease infinite;
+            border: 8px solid #FFD700;
+            border-radius: 20px;
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 4px 4px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000;
+            cursor: pointer;
+            z-index: 5000;
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.8), inset 0 0 30px rgba(255, 255, 255, 0.5);
+            pointer-events: auto;
+        }
+        
+        #goyslopMaxButton:hover {
+            transform: translate(-50%, -50%) scale(1.1);
+            box-shadow: 0 0 100px rgba(255, 215, 0, 1), inset 0 0 50px rgba(255, 255, 255, 0.8);
+        }
+        
+        @keyframes goyslopGradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        @keyframes goyslopPulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.05); }
+        }
+        
+        .goyslop-active-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 100;
+            animation: goyslopFlash 0.3s infinite;
+        }
+        
+        @keyframes goyslopFlash {
+            0% { background: rgba(255, 0, 0, 0.3); }
+            25% { background: rgba(0, 255, 0, 0.3); }
+            50% { background: rgba(0, 0, 255, 0.3); }
+            75% { background: rgba(255, 255, 0, 0.3); }
+            100% { background: rgba(255, 0, 255, 0.3); }
+        }
+        
+        #wrongAnswerBrowser {
+            display: none;
+            position: absolute;
+            top: 10%;
+            left: 10%;
+            width: 80%;
+            height: 80%;
+            background: #fff;
+            border: 2px solid #000;
+            border-radius: 8px 8px 0 0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            z-index: 3000;
+        }
+        
+        .browser-popup {
+            display: none;
+            position: absolute;
+            background: #fff;
+            border: 2px solid #000;
+            border-radius: 8px 8px 0 0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            z-index: 3001;
+        }
+        
+        #browserHeader {
+            background: linear-gradient(180deg, #e8e8e8 0%, #d0d0d0 100%);
+            padding: 8px;
+            border-bottom: 1px solid #999;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+        
+        #browserTitle {
+            font-size: 14px;
+            color: #333;
+            flex-grow: 1;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        #closeBrowserButton {
+            width: 15px;
+            height: 15px;
+            background: #ff5555;
+            color: white;
+            border: 1px solid #cc0000;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.05s;
+            position: relative;
+            animation: browserXJitter 0.3s infinite;
+        }
+        
+        #closeBrowserButton:hover {
+            background: #ff7777;
+        }
+        
+        @keyframes browserXJitter {
+            0%, 100% { transform: translate(0, 0); }
+            25% { transform: translate(2px, -2px); }
+            50% { transform: translate(-2px, 2px); }
+            75% { transform: translate(2px, 2px); }
+        }
+        
+        .browser-close-btn {
+            width: 20px;
+            height: 20px;
+            background: #ff5555;
+            color: white;
+            border: 1px solid #cc0000;
+            border-radius: 3px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.1s;
+        }
+        
+        .browser-close-btn:hover {
+            background: #ff7777;
+        }
+        
+        #browserContent {
+            width: 100%;
+            height: calc(100% - 40px);
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #ff0000;
+            font-weight: bold;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+            animation: flash 0.5s infinite;
+        }
+        
+        @keyframes flash {
+            0%, 100% { background: #fff; }
+            50% { background: #ffe0e0; }
+        }
+
+
+        h1 {
+            font-size: 64px;
+            margin-bottom: 20px;
+            color: #FFD700;
+            text-shadow: 4px 4px 0px #000;
+        }
+
+
+        .instruction {
+            font-size: 24px;
+            margin: 10px 0;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: inline-block;
+        }
+
+
+        button {
+            margin-top: 20px;
+            padding: 15px 30px;
+            font-size: 24px;
+            font-weight: bold;
+            background: #FFD700;
+            border: 3px solid #000;
+            border-radius: 10px;
+            cursor: pointer;
+            pointer-events: auto;
+            transition: transform 0.1s;
+        }
+
+
+        button:hover {
+            transform: scale(1.05);
+            background: #FFA500;
+        }
+
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+
+        #finalScore {
+            font-size: 36px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+   
+    <div id="dangerOverlay"></div>
+   
+    <div id="ui">
+        <div id="score">0</div>
+       
+        <div id="startScreen">
+            <h1>🐦 FAPPY BIRD 🐦</h1>
+            <div class="instruction">Click or Press SPACE to flap</div>
+            <div class="instruction">Fly through the pipes!</div>
+            <button id="startButton">START GAME</button>
+        </div>
+       
+        <div id="gameOverScreen">
+            <h1>GAME OVER!</h1>
+            <div id="finalScore"></div>
+            <button id="restartButton">PLAY AGAIN</button>
+        </div>
+        
+        <img id="deathGif" src="https://i.makeagif.com/media/4-14-2024/JAYpad.gif" alt="Death Animation">
+    </div>
+    
+    <div id="captchaOverlay">
+        <div id="captchaBox">
+            <h2>⚠️ VERIFICATION REQUIRED ⚠️</h2>
+            <div id="captchaQuestion"></div>
+            <div id="captchaOptions"></div>
+            <div id="captchaWarning">*Failure to verify may result in immediate termination*</div>
+        </div>
+    </div>
+    
+    <div id="imageAdOverlay">
+        <div id="imageAdBox">
+            <img id="adImage" src="" alt="Advertisement">
+            <div id="closeAdButton">✕</div>
+        </div>
+    </div>
+    
+    <div id="wrongAnswerBrowser">
+        <div id="browserHeader">
+            <div id="browserTitle">⚠️ CONGRATULATIONS! YOU'VE WON! ⚠️</div>
+            <div id="closeBrowserButton">✕</div>
+        </div>
+        <div id="browserContent">
+            🎉 CLICK HERE TO CLAIM YOUR $10,000 PRIZE! 🎉<br>
+            💰 LIMITED TIME OFFER! 💰<br>
+            👇 ACT NOW! 👇<br><br>
+            <div id="aiRantBox" style="max-width: 90%; margin: 20px auto; padding: 15px; background: rgba(0,0,0,0.8); border: 2px solid #FFD700; border-radius: 10px; color: #FFD700; font-size: 16px; text-align: left; max-height: 200px; overflow-y: auto; display: none;">
+                <div id="aiRantText" style="font-family: 'Courier New', monospace; line-height: 1.4;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <button id="goyslopMaxButton">🔥 GOYSLOP MAX 🔥</button>
+    <div id="goyslopOverlay"></div>
+
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer;
+        let bird, obstacles = [];
+        let gameActive = false;
+        let score = 0;
+        let birdVelocityY = 0;
+        let gravity = 9.81; // Real-world gravity in m/s²
+        let flapStrength = 3.5; // Adjusted for realistic physics
+        let gameSpeed = 0.1;
+        let obstacleSpawnDistance = -80;
+        let lastObstacleZ = obstacleSpawnDistance;
+        let groundLevel = -5;
+        let ceilingLevel = 10;
+       
+        // ADDED FOR MEME JOKE - hand animation variables
+        let hand;
+        let handAnimating = false;
+        let handAnimationTime = 0;
+        let handAnimationDuration = 0.6; // seconds
+        let textureLoader = new THREE.TextureLoader();
+       
+        // ADDED FOR MEME JOKE - Background objects and speed increase
+        let backgroundObjects = [];
+        let gameStartTime = 0;
+        let currentGameSpeed = gameSpeed;
+        
+        // ADDED - Image hiding toggle
+        let imagesHidden = false;
+        
+        // ADDED - Captcha system
+        let captchaActive = false;
+        let lastCaptchaTime = 0;
+        let captchaQuestions = [
+            {
+                question: "Please select all images containing MILFS in your area:",
+                options: ["✅ YES", "❌ NO", "🤔 MAYBE", "💀 ALREADY DID"],
+                correct: 3
+            },
+            {
+                question: "Are you over 18 and ready to meet HOT singles?",
+                options: ["Yes, I'm 18+", "No, I'm a cop", "I'm 12 but mature for my age", "Define 'ready'"],
+                correct: 0
+            },
+            {
+                question: "Click here to claim your FREE iPhone 69!",
+                options: ["CLAIM NOW!", "This seems legit", "My credit card is ready", "All of the above"],
+                correct: 3
+            },
+            {
+                question: "Congratulations! You've won $1,000,000! What do you do?",
+                options: ["Give bank details immediately", "Click suspicious link", "Trust the Nigerian Prince", "All of the above"],
+                correct: 3
+            },
+            {
+                question: "Select the image that does NOT contain a boner:",
+                options: ["🍆", "🌭", "🥖", "😔"],
+                correct: 3
+            },
+            {
+                question: "How many INCHES can you grow in 2 WEEKS?",
+                options: ["3-5 inches guaranteed!", "Doctors HATE this trick!", "Results may vary*", "I'm already 12 feet tall"],
+                correct: 1
+            },
+            {
+                question: "Which of these is DEFINITELY not a virus?",
+                options: ["FreeRAM_DOWNLOAD.exe", "NotAVirus.bat", "ClickForBoobs.scr", "None of the above"],
+                correct: 3
+            },
+            {
+                question: "Your computer has 69 VIRUSES! What now?",
+                options: ["Panic", "Download more RAM", "Call Microsoft Tech Support (totally real)", "Nice"],
+                correct: 3
+            }
+        ];
+        
+        let imageAds = [
+            'https://miro.medium.com/0*9AEJAZMSD06Yf-8o.jpg',
+            'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcST6-V18g80lkbDM1BDtYKYqtLk0B0JPBCDBg&s',
+            'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTVmp_ojCId5Yiuh1kLUtXXe2JKqp8LZhqi9Q&s',
+            'https://ecommercefastlane.com/wp-content/uploads/2023/10/FeetFinder-Review.webp'
+        ];
+        
+        let xButtonRunning = false;
+        let browserXRunning = false;
+        let browserOpenTime = 0;
+        let browserCheckInterval = null;
+        let browserXMoveInterval = null;
+        
+        // AI Rant system
+        let aiRantActive = false;
+        let lastAiRantTime = Date.now();
+        const VERTEX_AI_ENDPOINT = 'YOUR_VERTEX_AI_ENDPOINT'; // User needs to add their endpoint
+        const VERTEX_AI_PROJECT = 'YOUR_PROJECT_ID';
+        const VERTEX_AI_LOCATION = 'us-central1';
+        const VERTEX_AI_MODEL = 'gemini-pro';
+        
+        // GOYSLOP MAX mode
+        let goyslopMaxActive = false;
+        let goyslopMaxStartTime = 0;
+        let lastGoyslopButtonTime = Date.now();
+        let goyslopMaxDuration = 15000; // 15 seconds of chaos
+       
+        // Physics timing
+        let lastFrameTime = Date.now();
+        let deltaTime = 0;
+       
+        // ADDED FOR MEME JOKE - Liquid death particles
+        let liquidParticles = [];
+        let birdDead = false;
+
+
+        // Initialize Three.js
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x87CEEB, 80, 200);
+
+
+            // Camera - positioned behind and slightly above the bird
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 2, 10);
+            camera.lookAt(0, 0, -10);
+
+
+            // Renderer
+            const canvas = document.getElementById('gameCanvas');
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x4a90e2);
+
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight.position.set(5, 10, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            
+            const backLight = new THREE.DirectionalLight(0xffeecc, 0.3);
+            backLight.position.set(-5, 5, -10);
+            scene.add(backLight);
+
+
+            // Create bird
+            createBird();
+           
+            // ADDED FOR MEME JOKE - Create cartoon hand
+            createHand();
+
+
+            // Create ground
+            createGround();
+           
+            // ADDED FOR MEME JOKE - Add background elements
+            createBackground();
+
+
+            // Initial obstacles
+            for (let i = 0; i < 5; i++) {
+                createObstacle(obstacleSpawnDistance - (i * 25));
+            }
+
+
+            // Event listeners
+            document.getElementById('startButton').addEventListener('click', startGame);
+            document.getElementById('restartButton').addEventListener('click', restartGame);
+            document.addEventListener('keydown', handleInput);
+            document.addEventListener('click', handleInput);
+            
+            // ADDED - F key to toggle image visibility
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'f' || e.key === 'F') {
+                    imagesHidden = !imagesHidden;
+                    toggleImageVisibility();
+                }
+            });
+            
+            // GOYSLOP MAX button click handler
+            document.getElementById('goyslopMaxButton').addEventListener('click', () => {
+                activateGoyslopMax();
+            });
+
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize);
+
+
+            // Start animation loop
+            animate();
+        }
+
+
+        function createBird() {
+            // Bird body (sphere)
+            const bodyGeometry = new THREE.SphereGeometry(0.8, 32, 32);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0xFFD700 });
+            bird = new THREE.Mesh(bodyGeometry, bodyMaterial);
+
+
+            // Bird wing (left)
+            const wingGeometry = new THREE.BoxGeometry(0.3, 0.1, 1);
+            const wingMaterial = new THREE.MeshPhongMaterial({ color: 0xFFA500 });
+            const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            leftWing.position.set(-0.9, 0, 0);
+            bird.add(leftWing);
+
+
+            // Bird wing (right)
+            const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            rightWing.position.set(0.9, 0, 0);
+            bird.add(rightWing);
+
+
+            // Bird beak
+            const beakGeometry = new THREE.ConeGeometry(0.2, 0.5, 8);
+            const beakMaterial = new THREE.MeshPhongMaterial({ color: 0xFF6347 });
+            const beak = new THREE.Mesh(beakGeometry, beakMaterial);
+            beak.rotation.z = -Math.PI / 2;
+            beak.position.set(0, 0, -1);
+            bird.add(beak);
+
+
+            // Bird eyes
+            const eyeGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+            const eyeMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            leftEye.position.set(-0.3, 0.4, -0.6);
+            bird.add(leftEye);
+
+
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            rightEye.position.set(0.3, 0.4, -0.6);
+            bird.add(rightEye);
+            
+            // PINK STICK attached to bird (hand grabs around it)
+            const pinkGeometry = new THREE.CylinderGeometry(0.18, 0.18, 2.2, 16);
+            const pinkMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xff69b4,
+                shininess: 50,
+                emissive: 0xff1493,
+                emissiveIntensity: 0.1
+            });
+            const pinkStick = new THREE.Mesh(pinkGeometry, pinkMaterial);
+            pinkStick.rotation.z = Math.PI / 2; // Horizontal
+            pinkStick.position.set(1.1, -0.3, 0); // Right side of bird
+            bird.add(pinkStick);
+            
+            // Add thicker tip/head at the end
+            const tipGeometry = new THREE.SphereGeometry(0.22, 16, 16);
+            const tipMaterial = new THREE.MeshPhongMaterial({
+                color: 0xff1493,
+                shininess: 60,
+                emissive: 0xff1493,
+                emissiveIntensity: 0.15
+            });
+            const tip = new THREE.Mesh(tipGeometry, tipMaterial);
+            tip.position.set(2.2, -0.3, 0); // At the end of stick
+            tip.scale.set(1, 1.1, 1); // Slightly elongated
+            bird.add(tip);
+            
+            // Add subtle veins/wires running along the stick
+            const veinMaterial = new THREE.MeshPhongMaterial({
+                color: 0xdd5599, // Slightly darker pink
+                shininess: 40,
+                transparent: true,
+                opacity: 0.6
+            });
+            
+            // Create 3 veins snaking around the stick
+            for (let v = 0; v < 3; v++) {
+                const veinCurve = new THREE.CatmullRomCurve3([
+                    new THREE.Vector3(0, -0.3, 0),
+                    new THREE.Vector3(0.5, -0.3 + Math.sin(v * 2) * 0.12, Math.cos(v * 2) * 0.12),
+                    new THREE.Vector3(1.0, -0.3 + Math.sin(v * 2 + 1) * 0.12, Math.cos(v * 2 + 1) * 0.12),
+                    new THREE.Vector3(1.5, -0.3 + Math.sin(v * 2 + 2) * 0.12, Math.cos(v * 2 + 2) * 0.12),
+                    new THREE.Vector3(2.0, -0.3 + Math.sin(v * 2 + 3) * 0.12, Math.cos(v * 2 + 3) * 0.12)
+                ]);
+                
+                const veinGeometry = new THREE.TubeGeometry(veinCurve, 20, 0.015, 8, false);
+                const vein = new THREE.Mesh(veinGeometry, veinMaterial);
+                bird.add(vein);
+            }
+
+            bird.position.set(0, 0, 0);
+            scene.add(bird);
+        }
+       
+        // ADDED FOR MEME JOKE - Create realistic hand gripping and stroking pink stick
+        function createHand() {
+            hand = new THREE.Group();
+           
+            const skinColor = 0xffd9b3;
+            const skinMaterial = new THREE.MeshPhongMaterial({ color: skinColor, shininess: 35 });
+            const darkerSkin = new THREE.MeshPhongMaterial({ color: 0xf4c4a0, shininess: 25 });
+            const palmSkin = new THREE.MeshPhongMaterial({ color: 0xffe4c4, shininess: 20 });
+           
+            // Palm - more anatomically correct shape
+            const palmGeo = new THREE.BoxGeometry(0.85, 1.3, 0.35);
+            const palm = new THREE.Mesh(palmGeo, palmSkin);
+            palm.position.set(0, -0.05, -0.2);
+            palm.scale.set(1, 1, 0.9);
+            hand.add(palm);
+            
+            // Palm padding/meat at base
+            const palmPadGeo = new THREE.SphereGeometry(0.25, 12, 12);
+            const palmPad = new THREE.Mesh(palmPadGeo, skinMaterial);
+            palmPad.position.set(0, -0.6, -0.15);
+            palmPad.scale.set(1.3, 0.8, 0.7);
+            hand.add(palmPad);
+            
+            // Wrist - more defined
+            const wristGeo = new THREE.CylinderGeometry(0.36, 0.4, 0.7, 16);
+            const wrist = new THREE.Mesh(wristGeo, skinMaterial);
+            wrist.position.set(0, -1.0, -0.2);
+            hand.add(wrist);
+            
+            // Add wrist bones/tendons
+            const tendonGeo = new THREE.BoxGeometry(0.03, 0.5, 0.02);
+            const tendonMat = new THREE.MeshBasicMaterial({ color: 0xd4a574, transparent: true, opacity: 0.5 });
+            const tendon1 = new THREE.Mesh(tendonGeo, tendonMat);
+            tendon1.position.set(0.12, -0.85, 0.0);
+            hand.add(tendon1);
+            const tendon2 = new THREE.Mesh(tendonGeo, tendonMat);
+            tendon2.position.set(-0.12, -0.85, 0.0);
+            hand.add(tendon2);
+           
+            // Finger segments with knuckle details
+            const fingerBaseGeo = new THREE.CylinderGeometry(0.11, 0.12, 0.48, 14);
+            const fingerMidGeo = new THREE.CylinderGeometry(0.10, 0.11, 0.42, 14);
+            const fingerTipGeo = new THREE.SphereGeometry(0.11, 14, 14);
+            
+            // Add knuckle bumps
+            const knuckleGeo = new THREE.SphereGeometry(0.08, 10, 10);
+            const knuckleMat = new THREE.MeshPhongMaterial({ color: 0xf0d0a8, shininess: 25 });
+            
+            // Index finger - curves from back over stick
+            const index1 = new THREE.Mesh(fingerBaseGeo, skinMaterial);
+            index1.position.set(0.28, 0.5, -0.15);
+            index1.rotation.x = -0.28;
+            hand.add(index1);
+            
+            const indexKnuckle1 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            indexKnuckle1.position.set(0.28, 0.73, -0.05);
+            hand.add(indexKnuckle1);
+            
+            const index2 = new THREE.Mesh(fingerMidGeo, skinMaterial);
+            index2.position.set(0.28, 0.7, 0.15);
+            index2.rotation.x = -0.85;
+            hand.add(index2);
+            
+            const indexKnuckle2 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            indexKnuckle2.position.set(0.28, 0.85, 0.3);
+            indexKnuckle2.scale.set(0.8, 0.8, 0.8);
+            hand.add(indexKnuckle2);
+            
+            const index3 = new THREE.Mesh(fingerTipGeo, darkerSkin);
+            index3.position.set(0.28, 0.55, 0.42);
+            index3.scale.set(1, 1.25, 1);
+            hand.add(index3);
+            
+            // Fingernail
+            const nailGeo = new THREE.BoxGeometry(0.09, 0.14, 0.02);
+            const nailMat = new THREE.MeshPhongMaterial({ color: 0xffc0cb, shininess: 95 });
+            const indexNail = new THREE.Mesh(nailGeo, nailMat);
+            indexNail.position.set(0.28, 0.58, 0.48);
+            indexNail.rotation.x = -0.5;
+            hand.add(indexNail);
+            
+            // Middle finger - tallest
+            const middle1 = new THREE.Mesh(fingerBaseGeo, skinMaterial);
+            middle1.position.set(0.09, 0.56, -0.15);
+            middle1.rotation.x = -0.24;
+            hand.add(middle1);
+            
+            const middleKnuckle1 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            middleKnuckle1.position.set(0.09, 0.8, -0.04);
+            hand.add(middleKnuckle1);
+            
+            const middle2 = new THREE.Mesh(fingerMidGeo, skinMaterial);
+            middle2.position.set(0.09, 0.78, 0.17);
+            middle2.rotation.x = -0.88;
+            hand.add(middle2);
+            
+            const middleKnuckle2 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            middleKnuckle2.position.set(0.09, 0.92, 0.33);
+            middleKnuckle2.scale.set(0.8, 0.8, 0.8);
+            hand.add(middleKnuckle2);
+            
+            const middle3 = new THREE.Mesh(fingerTipGeo, darkerSkin);
+            middle3.position.set(0.09, 0.6, 0.45);
+            middle3.scale.set(1, 1.25, 1);
+            hand.add(middle3);
+            
+            const middleNail = new THREE.Mesh(nailGeo, nailMat);
+            middleNail.position.set(0.09, 0.63, 0.51);
+            middleNail.rotation.x = -0.5;
+            hand.add(middleNail);
+            
+            // Ring finger
+            const ring1 = new THREE.Mesh(fingerBaseGeo, skinMaterial);
+            ring1.position.set(-0.09, 0.53, -0.15);
+            ring1.rotation.x = -0.27;
+            ring1.scale.set(0.96, 0.96, 0.96);
+            hand.add(ring1);
+            
+            const ringKnuckle1 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            ringKnuckle1.position.set(-0.09, 0.75, -0.05);
+            ringKnuckle1.scale.set(0.95, 0.95, 0.95);
+            hand.add(ringKnuckle1);
+            
+            const ring2 = new THREE.Mesh(fingerMidGeo, skinMaterial);
+            ring2.position.set(-0.09, 0.73, 0.14);
+            ring2.rotation.x = -0.84;
+            ring2.scale.set(0.96, 0.96, 0.96);
+            hand.add(ring2);
+            
+            const ringKnuckle2 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            ringKnuckle2.position.set(-0.09, 0.87, 0.3);
+            ringKnuckle2.scale.set(0.75, 0.75, 0.75);
+            hand.add(ringKnuckle2);
+            
+            const ring3 = new THREE.Mesh(fingerTipGeo, darkerSkin);
+            ring3.position.set(-0.09, 0.57, 0.4);
+            ring3.scale.set(0.96, 1.2, 0.96);
+            hand.add(ring3);
+            
+            const ringNail = new THREE.Mesh(nailGeo, nailMat);
+            ringNail.position.set(-0.09, 0.6, 0.46);
+            ringNail.rotation.x = -0.5;
+            ringNail.scale.set(0.95, 0.95, 0.95);
+            hand.add(ringNail);
+            
+            // Pinky - smallest
+            const pinky1 = new THREE.Mesh(fingerBaseGeo, skinMaterial);
+            pinky1.position.set(-0.26, 0.46, -0.15);
+            pinky1.rotation.x = -0.31;
+            pinky1.scale.set(0.87, 0.87, 0.87);
+            hand.add(pinky1);
+            
+            const pinkyKnuckle1 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            pinkyKnuckle1.position.set(-0.26, 0.67, -0.06);
+            pinkyKnuckle1.scale.set(0.85, 0.85, 0.85);
+            hand.add(pinkyKnuckle1);
+            
+            const pinky2 = new THREE.Mesh(fingerMidGeo, skinMaterial);
+            pinky2.position.set(-0.26, 0.63, 0.09);
+            pinky2.rotation.x = -0.88;
+            pinky2.scale.set(0.87, 0.87, 0.87);
+            hand.add(pinky2);
+            
+            const pinkyKnuckle2 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            pinkyKnuckle2.position.set(-0.26, 0.76, 0.24);
+            pinkyKnuckle2.scale.set(0.7, 0.7, 0.7);
+            hand.add(pinkyKnuckle2);
+            
+            const pinky3 = new THREE.Mesh(fingerTipGeo, darkerSkin);
+            pinky3.position.set(-0.26, 0.5, 0.34);
+            pinky3.scale.set(0.87, 1.12, 0.87);
+            hand.add(pinky3);
+            
+            const pinkyNail = new THREE.Mesh(nailGeo, nailMat);
+            pinkyNail.position.set(-0.26, 0.53, 0.39);
+            pinkyNail.rotation.x = -0.5;
+            pinkyNail.scale.set(0.85, 0.85, 0.85);
+            hand.add(pinkyNail);
+            
+            // Thumb - opposes from bottom with more detail
+            const thumbBaseGeo = new THREE.CylinderGeometry(0.15, 0.16, 0.54, 14);
+            const thumb1 = new THREE.Mesh(thumbBaseGeo, skinMaterial);
+            thumb1.position.set(0.48, -0.18, 0.02);
+            thumb1.rotation.set(0.42, 0, 0.62);
+            hand.add(thumb1);
+            
+            const thumbKnuckle1 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            thumbKnuckle1.position.set(0.62, 0.05, 0.1);
+            thumbKnuckle1.scale.set(1.1, 1.1, 1.1);
+            hand.add(thumbKnuckle1);
+            
+            const thumbMidGeo = new THREE.CylinderGeometry(0.14, 0.15, 0.44, 14);
+            const thumb2 = new THREE.Mesh(thumbMidGeo, skinMaterial);
+            thumb2.position.set(0.68, 0.12, 0.17);
+            thumb2.rotation.set(0.62, 0, 0.32);
+            hand.add(thumb2);
+            
+            const thumbKnuckle2 = new THREE.Mesh(knuckleGeo, knuckleMat);
+            thumbKnuckle2.position.set(0.77, 0.3, 0.23);
+            thumbKnuckle2.scale.set(1.0, 1.0, 1.0);
+            hand.add(thumbKnuckle2);
+            
+            const thumb3 = new THREE.Mesh(fingerTipGeo, darkerSkin);
+            thumb3.position.set(0.73, 0.38, 0.27);
+            thumb3.scale.set(1.25, 1.35, 1.25);
+            hand.add(thumb3);
+            
+            const thumbNail = new THREE.Mesh(nailGeo, nailMat);
+            thumbNail.position.set(0.76, 0.45, 0.29);
+            thumbNail.rotation.set(0.62, 0, 0.32);
+            thumbNail.scale.set(1.1, 1.1, 1.1);
+            hand.add(thumbNail);
+            
+            // Thumb pad at base
+            const thumbPadGeo = new THREE.SphereGeometry(0.22, 12, 12);
+            const thumbPad = new THREE.Mesh(thumbPadGeo, palmSkin);
+            thumbPad.position.set(0.35, -0.35, -0.05);
+            thumbPad.scale.set(1.1, 0.9, 0.8);
+            hand.add(thumbPad);
+            
+            // Initial position - will be updated in animate loop
+            hand.position.set(0, 0, 0);
+            scene.add(hand);
+        }
+       
+        // ADDED FOR MEME JOKE - Create background scenery with PARALLAX LAYERS and Israeli flags
+        function createBackground() {
+            // Far background layer - slower parallax
+            createBackgroundLayer(0.2, -120, -300, 0.6);
+            
+            // Mid background layer - medium parallax
+            createBackgroundLayer(0.4, -60, -120, 0.8);
+            
+            // Close background layer - faster parallax
+            createBackgroundLayer(0.6, -20, -60, 1.0);
+            
+            // ISRAELI FLAGS and other goyslop logos (equal chance for all)
+            const flagLogos = [
+                'https://upload.wikimedia.org/wikipedia/commons/d/d4/Flag_of_Israel.svg',
+                'https://www.marketbeat.com/logos/articles/med_20250313153947_palantirs-deal-with-archer-aviation-keeps-ais-futu.png',
+                'https://insightsoftware.com/wp-content/uploads/2020/07/Oracle-Opens-Door-to-External-Cloud-Data-Sources-FB.jpg',
+                'https://upload.wikimedia.org/wikipedia/en/1/12/US_Israel_flag.png',
+                'https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/81/8b/ea/818bea73-1621-c2f2-52f6-23079f36ea77/198999114379.jpg/600x600bf-60.jpg',
+                'https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/0a/c3/0c/0ac30c52-1afb-948b-c145-f3a916370214/mza_4434379870492158684.jpg/1200x1200ECA.PESS01-60.jpg',
+                'https://i1.sndcdn.com/artworks-D2BYkE6JOzDGbK2C-AyziCA-t500x500.jpg',
+                'https://upload.wikimedia.org/wikipedia/en/archive/c/cc/20250726202534%21OnlyFans_logo.svg'
+            ];
+            
+            for (let i = 0; i < 60; i++) {
+                const logoURL = flagLogos[Math.floor(Math.random() * flagLogos.length)];
+                const flagGroup = new THREE.Group();
+                
+                // Flag pole
+                const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 4, 8);
+                const poleMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+                const pole = new THREE.Mesh(poleGeo, poleMat);
+                flagGroup.add(pole);
+                
+                // Flag with texture
+                const flagGeo = new THREE.PlaneGeometry(2.5, 1.8);
+                const texture = new THREE.TextureLoader().load(logoURL);
+                const flagMat = new THREE.MeshPhongMaterial({ 
+                    map: texture,
+                    side: THREE.DoubleSide,
+                    transparent: true
+                });
+                const flag = new THREE.Mesh(flagGeo, flagMat);
+                flag.position.set(1.25, 1.5, 0);
+                flagGroup.add(flag);
+                
+                // Random position
+                const side = Math.random() > 0.5 ? 1 : -1;
+                const distance = Math.random();
+                let xPos, zPos, yPos, parallaxSpeed;
+                
+                if (distance < 0.3) { // Far flags
+                    xPos = side * (60 + Math.random() * 40);
+                    zPos = -150 - Math.random() * 100;
+                    yPos = -3 + Math.random() * 8;
+                    parallaxSpeed = 0.2;
+                } else if (distance < 0.7) { // Mid flags
+                    xPos = side * (30 + Math.random() * 30);
+                    zPos = -80 - Math.random() * 70;
+                    yPos = -3 + Math.random() * 10;
+                    parallaxSpeed = 0.4;
+                } else { // Close flags
+                    xPos = side * (15 + Math.random() * 20);
+                    zPos = -30 - Math.random() * 50;
+                    yPos = -3 + Math.random() * 12;
+                    parallaxSpeed = 0.6;
+                }
+                
+                flagGroup.position.set(xPos, yPos, zPos);
+                flagGroup.rotation.y = Math.random() * Math.PI;
+                flagGroup.userData.type = 'flag';
+                flagGroup.userData.parallaxSpeed = parallaxSpeed;
+                scene.add(flagGroup);
+                backgroundObjects.push(flagGroup);
+            }
+        }
+        
+        // Helper function to create parallax layers
+        function createBackgroundLayer(parallaxSpeed, minZ, maxZ, opacity) {
+            // Clouds
+            const cloudMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xffffff, 
+                transparent: true, 
+                opacity: opacity * 0.85,
+                emissive: 0xffffff,
+                emissiveIntensity: 0.1
+            });
+            const numClouds = 15;
+            for (let i = 0; i < numClouds; i++) {
+                const cloudGroup = new THREE.Group();
+                // Create fluffy cloud with multiple spheres
+                for (let j = 0; j < 6; j++) {
+                    const cloudGeometry = new THREE.SphereGeometry(1.8 + Math.random() * 1.5, 10, 10);
+                    const cloudPart = new THREE.Mesh(cloudGeometry, cloudMaterial);
+                    cloudPart.position.set(Math.random() * 4 - 2, Math.random() * 2.5 - 1.2, Math.random() * 2 - 1);
+                    cloudGroup.add(cloudPart);
+                }
+                cloudGroup.position.set(
+                    Math.random() * 80 - 40,
+                    6 + Math.random() * 10,
+                    minZ + Math.random() * (maxZ - minZ)
+                );
+                cloudGroup.userData.type = 'cloud';
+                cloudGroup.userData.parallaxSpeed = parallaxSpeed;
+                scene.add(cloudGroup);
+                backgroundObjects.push(cloudGroup);
+            }
+           
+            // Distant mountains (ON SIDES ONLY)
+            const mountainMaterial = new THREE.MeshPhongMaterial({ 
+                color: parallaxSpeed < 0.4 ? 0x8b7355 : 0x654321,
+                emissive: 0x3d2817,
+                emissiveIntensity: 0.1
+            });
+            const numMountains = 10;
+            for (let i = 0; i < numMountains; i++) {
+                const mountainGeometry = new THREE.ConeGeometry(
+                    18 + Math.random() * 15, 
+                    25 + Math.random() * 20, 
+                    5
+                );
+                const mountain = new THREE.Mesh(mountainGeometry, mountainMaterial);
+                const side = Math.random() > 0.5 ? 1 : -1;
+                mountain.position.set(
+                    side * (50 + Math.random() * 60),
+                    0,
+                    minZ + Math.random() * (maxZ - minZ)
+                );
+                mountain.rotation.y = Math.random() * Math.PI;
+                mountain.userData.type = 'mountain';
+                mountain.userData.parallaxSpeed = parallaxSpeed;
+                scene.add(mountain);
+                backgroundObjects.push(mountain);
+            }
+           
+            // Flying birds in distance
+            const birdMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const numBirds = 12;
+            for (let i = 0; i < numBirds; i++) {
+                const birdGeometry = new THREE.BoxGeometry(0.5, 0.12, 1);
+                const distantBird = new THREE.Mesh(birdGeometry, birdMaterial);
+                distantBird.position.set(
+                    Math.random() * 100 - 50,
+                    10 + Math.random() * 8,
+                    minZ + Math.random() * (maxZ - minZ)
+                );
+                distantBird.userData.type = 'bird';
+                distantBird.userData.parallaxSpeed = parallaxSpeed;
+                distantBird.userData.bobOffset = Math.random() * Math.PI * 2;
+                scene.add(distantBird);
+                backgroundObjects.push(distantBird);
+            }
+           
+            // Trees on the ground (ON SIDES ONLY)
+            const treeTrunkMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
+            const treeLeavesMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x228b22,
+                emissive: 0x0a4d0a,
+                emissiveIntensity: 0.2
+            });
+            const numTrees = 15;
+            for (let i = 0; i < numTrees; i++) {
+                const trunk = new THREE.CylinderGeometry(0.6, 0.8, 5, 10);
+                const treeTrunk = new THREE.Mesh(trunk, treeTrunkMaterial);
+                const leaves = new THREE.SphereGeometry(3, 10, 10);
+                const treeLeaves = new THREE.Mesh(leaves, treeLeavesMaterial);
+                treeLeaves.position.y = 3.5;
+                treeLeaves.scale.set(1, 1.4, 1);
+                treeTrunk.add(treeLeaves);
+                const side = Math.random() > 0.5 ? 1 : -1;
+                treeTrunk.position.set(
+                    side * (30 + Math.random() * 40),
+                    -3,
+                    minZ + Math.random() * (maxZ - minZ)
+                );
+                treeTrunk.userData.type = 'tree';
+                treeTrunk.userData.parallaxSpeed = parallaxSpeed;
+                scene.add(treeTrunk);
+                backgroundObjects.push(treeTrunk);
+            }
+        }
+       
+        // ADDED FOR MEME JOKE - Regenerate background objects that passed camera
+        function regenerateBackgroundObject(obj) {
+            const parallaxSpeed = obj.userData.parallaxSpeed || 0.5;
+            const baseZ = parallaxSpeed < 0.35 ? -180 : (parallaxSpeed < 0.55 ? -100 : -70);
+            const rangeZ = 50;
+            
+            if (obj.userData.type === 'cloud') {
+                obj.position.set(
+                    Math.random() * 80 - 40,
+                    6 + Math.random() * 10,
+                    baseZ - Math.random() * rangeZ
+                );
+            } else if (obj.userData.type === 'mountain') {
+                const side = Math.random() > 0.5 ? 1 : -1;
+                obj.position.set(
+                    side * (50 + Math.random() * 60),
+                    0,
+                    baseZ - Math.random() * rangeZ
+                );
+            } else if (obj.userData.type === 'bird') {
+                obj.position.set(
+                    Math.random() * 100 - 50,
+                    10 + Math.random() * 8,
+                    baseZ - Math.random() * rangeZ
+                );
+            } else if (obj.userData.type === 'tree') {
+                const side = Math.random() > 0.5 ? 1 : -1;
+                obj.position.set(
+                    side * (30 + Math.random() * 40),
+                    -3,
+                    baseZ - Math.random() * rangeZ
+                );
+            } else if (obj.userData.type === 'flag') {
+                const side = Math.random() > 0.5 ? 1 : -1;
+                let xPos;
+                if (parallaxSpeed < 0.35) {
+                    xPos = side * (60 + Math.random() * 40);
+                } else if (parallaxSpeed < 0.55) {
+                    xPos = side * (30 + Math.random() * 30);
+                } else {
+                    xPos = side * (15 + Math.random() * 20);
+                }
+                obj.position.set(
+                    xPos,
+                    -3 + Math.random() * 12,
+                    baseZ - Math.random() * rangeZ
+                );
+            }
+        }
+
+
+        function createGround() {
+            const groundGeometry = new THREE.PlaneGeometry(60, 250);
+            const groundMaterial = new THREE.MeshPhongMaterial({
+                color: 0x7CFC00,
+                side: THREE.DoubleSide,
+                shininess: 15
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = groundLevel;
+            scene.add(ground);
+
+
+            // Add grass-like texture with varying shades
+            for (let i = 0; i < 25; i++) {
+                const grassGeometry = new THREE.PlaneGeometry(60, 10);
+                const grassShade = 0x228B22 + Math.random() * 0x003300;
+                const grassMaterial = new THREE.MeshPhongMaterial({
+                    color: grassShade,
+                    side: THREE.DoubleSide,
+                    shininess: 10
+                });
+                const grass = new THREE.Mesh(grassGeometry, grassMaterial);
+                grass.rotation.x = -Math.PI / 2;
+                grass.position.set(0, groundLevel + 0.01, -i * 10);
+                scene.add(grass);
+            }
+            
+            // Add decorative flowers
+            for (let i = 0; i < 30; i++) {
+                const flowerStemGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6);
+                const flowerStemMat = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+                const stem = new THREE.Mesh(flowerStemGeo, flowerStemMat);
+                
+                const flowerPetalGeo = new THREE.SphereGeometry(0.1, 8, 8);
+                const flowerColors = [0xFF69B4, 0xFFFF00, 0xFF0000, 0xFFA500, 0x9370DB];
+                const flowerPetalMat = new THREE.MeshPhongMaterial({ 
+                    color: flowerColors[Math.floor(Math.random() * flowerColors.length)],
+                    emissive: 0xffffff,
+                    emissiveIntensity: 0.1
+                });
+                const petal = new THREE.Mesh(flowerPetalGeo, flowerPetalMat);
+                petal.position.y = 0.15;
+                stem.add(petal);
+                
+                const side = Math.random() > 0.5 ? 1 : -1;
+                stem.position.set(
+                    side * (10 + Math.random() * 15),
+                    groundLevel + 0.15,
+                    -Math.random() * 200
+                );
+                scene.add(stem);
+            }
+        }
+
+
+        function createObstacle(zPosition) {
+            const gapSize = 5.5 + Math.random() * 1.5; // ADDED: Randomize gap size
+            const gapPosition = groundLevel + 2 + Math.random() * 5; // ADDED: More vertical variation
+            const xOffset = 0; // CENTERED with player
+           
+            // ADDED FOR MEME JOKE - Random image URLs for pipe textures
+            const textureURLs = [
+                'https://i0.wp.com/www.thecoast.ca/wp-content/uploads/2025/03/waiting_for_your_call.webp.webp?fit=780%2C975&ssl=1',
+                'https://s.yimg.com/ny/api/res/1.2/Hbz.QR.epc1YKNnMUkq_9g--/YXBwaWQ9aGlnaGxhbmRlcjt3PTIwNDg7aD0xNDY0O2NmPXdlYnA-/https://media.zenfs.com/en/where_is_the_buzz_814/0a23b2e3bdc48205b71ce68d462ffe97',
+                'https://s.yimg.com/os/en/life_style_868/027160dcfa5c7ab8147de31d3cf164ad',
+                'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTuvfq3ZORI7B8ceUG_59MMIMdKuKu9R007LQ&s',
+                'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK5p6leADThrWlMq5KonVR2QC1wMT13wZHog&s',
+                'https://s.yimg.com/ny/api/res/1.2/g74Gou9h97WWczzf3MMyEg--/YXBwaWQ9aGlnaGxhbmRlcjt3PTk2MDtoPTEzMjk7Y2Y9d2VicA--/https://media.zenfs.com/en/mandatory_995/a3d56423a526b208777d6a227b39c04d'
+            ];
+            const randomURL = textureURLs[Math.floor(Math.random() * textureURLs.length)];
+           
+            // Bottom pipe
+            const bottomHeight = gapPosition - groundLevel - gapSize / 2;
+            const pipeWidth = 6; // INCREASED for larger images
+            const pipeDepth = 6; // INCREASED for larger images
+            const bottomGeometry = new THREE.BoxGeometry(pipeWidth, bottomHeight, pipeDepth);
+           
+            // Load texture for bottom pipe - FULL SIZED (not tiled)
+            let bottomPipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 }); // Default green
+            const bottomPipe = new THREE.Mesh(bottomGeometry, bottomPipeMaterial);
+            bottomPipe.position.set(xOffset, groundLevel + bottomHeight / 2, zPosition);
+           
+            textureLoader.load(randomURL, (texture) => {
+                // Don't repeat - stretch to fill the face
+                texture.wrapS = THREE.ClampToEdgeWrapping;
+                texture.wrapT = THREE.ClampToEdgeWrapping;
+                texture.minFilter = THREE.LinearFilter;
+                bottomPipe.material = new THREE.MeshPhongMaterial({ map: texture });
+                bottomPipe.material.needsUpdate = true;
+            }, undefined, (error) => {
+                console.log('Texture load error for bottom pipe:', error);
+            });
+
+
+            // Top pipe
+            const topHeight = ceilingLevel - gapPosition - gapSize / 2;
+            const topGeometry = new THREE.BoxGeometry(pipeWidth, topHeight, pipeDepth);
+            let topPipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 }); // Default green
+            const topPipe = new THREE.Mesh(topGeometry, topPipeMaterial);
+            topPipe.position.set(xOffset, gapPosition + gapSize / 2 + topHeight / 2, zPosition);
+           
+            textureLoader.load(randomURL, (texture) => {
+                // Don't repeat - stretch to fill the face
+                texture.wrapS = THREE.ClampToEdgeWrapping;
+                texture.wrapT = THREE.ClampToEdgeWrapping;
+                texture.minFilter = THREE.LinearFilter;
+                topPipe.material = new THREE.MeshPhongMaterial({ map: texture });
+                topPipe.material.needsUpdate = true;
+            }, undefined, (error) => {
+                console.log('Texture load error for top pipe:', error);
+            });
+
+
+            // Pipe caps
+            const capGeometry = new THREE.BoxGeometry(pipeWidth + 1, 0.5, pipeDepth + 1);
+            const capMaterial = new THREE.MeshPhongMaterial({ color: 0x006400 });
+           
+            const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
+            bottomCap.position.set(xOffset, gapPosition - gapSize / 2, zPosition);
+           
+            const topCap = new THREE.Mesh(capGeometry, capMaterial);
+            topCap.position.set(xOffset, gapPosition + gapSize / 2, zPosition);
+
+
+            const obstacle = {
+                bottom: bottomPipe,
+                top: topPipe,
+                bottomCap: bottomCap,
+                topCap: topCap,
+                passed: false,
+                z: zPosition,
+                gapY: gapPosition,
+                xOffset: xOffset, // ADDED: Store x offset for collision detection
+                initialX: xOffset, // Store initial X for movement
+                movementAngle: Math.random() * Math.PI * 2, // Random starting angle
+                movementSpeed: 0.0005 + Math.random() * 0.001, // Random movement speed
+                movementRadius: 0 // Starts at 0, increases with score
+            };
+
+
+            scene.add(bottomPipe);
+            scene.add(topPipe);
+            scene.add(bottomCap);
+            scene.add(topCap);
+            obstacles.push(obstacle);
+        }
+
+
+        function handleInput(e) {
+            if (e.type === 'click' && e.target.tagName === 'BUTTON') return;
+            if (e.type === 'keydown' && e.code !== 'Space') return;
+           
+            if (gameActive && !captchaActive) {
+                flap();
+                // ADDED FOR MEME JOKE - Trigger hand animation
+                triggerHandAnimation();
+            }
+        }
+        
+        // ADDED - Toggle visibility of all images (flags and pipe textures)
+        function toggleImageVisibility() {
+            // Hide/show flag textures only (keep poles visible)
+            backgroundObjects.forEach(obj => {
+                if (obj.userData.type === 'flag') {
+                    // Flag group has pole and flag as children
+                    obj.children.forEach(child => {
+                        if (child.geometry && child.geometry.type === 'PlaneGeometry') {
+                            // This is the flag plane - toggle texture
+                            if (imagesHidden) {
+                                child.material = new THREE.MeshPhongMaterial({ 
+                                    color: 0xffffff,
+                                    side: THREE.DoubleSide 
+                                });
+                            } else {
+                                // Reload random flag texture
+                                const flagLogos = [
+                                    'https://upload.wikimedia.org/wikipedia/commons/d/d4/Flag_of_Israel.svg',
+                                    'https://www.marketbeat.com/logos/articles/med_20250313153947_palantirs-deal-with-archer-aviation-keeps-ais-futu.png',
+                                    'https://insightsoftware.com/wp-content/uploads/2020/07/Oracle-Opens-Door-to-External-Cloud-Data-Sources-FB.jpg',
+                                    'https://upload.wikimedia.org/wikipedia/en/1/12/US_Israel_flag.png',
+                                    'https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/81/8b/ea/818bea73-1621-c2f2-52f6-23079f36ea77/198999114379.jpg/600x600bf-60.jpg',
+                                    'https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/0a/c3/0c/0ac30c52-1afb-948b-c145-f3a916370214/mza_4434379870492158684.jpg/1200x1200ECA.PESS01-60.jpg',
+                                    'https://i1.sndcdn.com/artworks-D2BYkE6JOzDGbK2C-AyziCA-t500x500.jpg',
+                                    'https://upload.wikimedia.org/wikipedia/en/archive/c/cc/20250726202534%21OnlyFans_logo.svg'
+                                ];
+                                const randomLogo = flagLogos[Math.floor(Math.random() * flagLogos.length)];
+                                const texture = new THREE.TextureLoader().load(randomLogo);
+                                child.material = new THREE.MeshPhongMaterial({ 
+                                    map: texture,
+                                    side: THREE.DoubleSide,
+                                    transparent: true
+                                });
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // Hide/show pipe textures only (keep pipes visible)
+            obstacles.forEach(obs => {
+                if (imagesHidden) {
+                    // Replace with solid green color
+                    obs.bottom.material = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+                    obs.top.material = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+                } else {
+                    // Reload random texture
+                    const textureURLs = [
+                        'https://i0.wp.com/www.thecoast.ca/wp-content/uploads/2025/03/waiting_for_your_call.webp.webp?fit=780%2C975&ssl=1',
+                        'https://s.yimg.com/ny/api/res/1.2/Hbz.QR.epc1YKNnMUkq_9g--/YXBwaWQ9aGlnaGxhbmRlcjt3PTIwNDg7aD0xNDY0O2NmPXdlYnA-/https://media.zenfs.com/en/where_is_the_buzz_814/0a23b2e3bdc48205b71ce68d462ffe97',
+                        'https://s.yimg.com/os/en/life_style_868/027160dcfa5c7ab8147de31d3cf164ad',
+                        'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTuvfq3ZORI7B8ceUG_59MMIMdKuKu9R007LQ&s',
+                        'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK5p6leADThrWlMq5KonVR2QC1wMT13wZHog&s',
+                        'https://s.yimg.com/ny/api/res/1.2/g74Gou9h97WWczzf3MMyEg--/YXBwaWQ9aGlnaGxhbmRlcjt3PTk2MDtoPTEzMjk7Y2Y9d2VicA--/https://media.zenfs.com/en/mandatory_995/a3d56423a526b208777d6a227b39c04d'
+                    ];
+                    const randomURL = textureURLs[Math.floor(Math.random() * textureURLs.length)];
+                    
+                    const texture = textureLoader.load(randomURL);
+                    texture.wrapS = THREE.ClampToEdgeWrapping;
+                    texture.wrapT = THREE.ClampToEdgeWrapping;
+                    texture.minFilter = THREE.LinearFilter;
+                    
+                    obs.bottom.material = new THREE.MeshPhongMaterial({ map: texture });
+                    obs.top.material = new THREE.MeshPhongMaterial({ map: texture });
+                }
+            });
+        }
+       
+        // ADDED FOR MEME JOKE - Hand animation trigger
+        function triggerHandAnimation() {
+            if (!handAnimating) {
+                handAnimating = true;
+                handAnimationTime = 0;
+            }
+        }
+        
+        // ADDED - Show random captcha or image ad (25% chance each: quiz, ad1, ad2, ad3)
+        function showCaptcha() {
+            if (captchaActive || !gameActive) return;
+            
+            captchaActive = true;
+            
+            // Equal 25% chance: 0 = quiz, 1 = ad1, 2 = ad2, 3 = ad3
+            const randomChoice = Math.floor(Math.random() * 5);
+            
+            if (randomChoice === 0) {
+                // Quiz captcha (random question)
+                const captcha = captchaQuestions[Math.floor(Math.random() * captchaQuestions.length)];
+                
+                document.getElementById('captchaQuestion').textContent = captcha.question;
+                
+                const optionsDiv = document.getElementById('captchaOptions');
+                optionsDiv.innerHTML = '';
+                
+                captcha.options.forEach((option, index) => {
+                    const button = document.createElement('button');
+                    button.className = 'captcha-option';
+                    button.textContent = option;
+                    button.onclick = () => handleCaptchaAnswer(index, captcha.correct);
+                    optionsDiv.appendChild(button);
+                });
+                
+                document.getElementById('captchaOverlay').style.display = 'block';
+            } else {
+                // Image ad (specific ad based on choice)
+                const adIndex = randomChoice - 1; // 1->0, 2->1, 3->2, 4->3
+                const selectedAd = imageAds[adIndex];
+                document.getElementById('adImage').src = selectedAd;
+                document.getElementById('imageAdOverlay').style.display = 'block';
+                
+                // X button ALWAYS runs away on image ads
+                xButtonRunning = true;
+                
+                const closeBtn = document.getElementById('closeAdButton');
+                closeBtn.classList.add('running');
+                closeBtn.onmouseenter = runAwayFromMouse;
+                closeBtn.onclick = closeImageAd;
+            }
+        }
+        
+        function runAwayFromMouse(e) {
+            if (!xButtonRunning) return;
+            
+            const button = e.target;
+            const box = document.getElementById('imageAdBox');
+            const boxRect = box.getBoundingClientRect();
+            
+            // Random position within the ad box area
+            const newTop = Math.random() * 80 - 40; // -40 to 40
+            const newRight = Math.random() * 80 - 40; // -40 to 40
+            
+            button.style.top = newTop + 'px';
+            button.style.right = newRight + 'px';
+        }
+        
+        function closeImageAd() {
+            document.getElementById('imageAdOverlay').style.display = 'none';
+            captchaActive = false;
+            lastCaptchaTime = Date.now();
+            xButtonRunning = false;
+            
+            // Reset button position
+            const closeBtn = document.getElementById('closeAdButton');
+            closeBtn.style.top = '-15px';
+            closeBtn.style.right = '-15px';
+        }
+        
+        function handleCaptchaAnswer(selected, correct) {
+            if (selected === correct) {
+                document.getElementById('captchaOverlay').style.display = 'none';
+                captchaActive = false;
+                lastCaptchaTime = Date.now();
+            } else {
+                // Wrong answer - show fake browser popup
+                document.getElementById('wrongAnswerBrowser').style.display = 'block';
+                browserOpenTime = Date.now();
+                
+                // Start checking if browser open too long
+                browserCheckInterval = setInterval(() => {
+                    const timeOpen = (Date.now() - browserOpenTime) / 1000;
+                    if (timeOpen > 5) { // After 5 seconds, spawn new popup
+                        spawnCasinoPopup();
+                        clearInterval(browserCheckInterval);
+                    }
+                }, 1000);
+                
+                // Make browser X button harder to click - randomly move it
+                const browserCloseBtn = document.getElementById('closeBrowserButton');
+                browserCloseBtn.onclick = closeBrowserPopup;
+                
+                // Randomly reposition the X button every 0.5 seconds
+                browserXMoveInterval = setInterval(() => {
+                    const randomTop = Math.random() * 10 - 5; // -5 to 5px
+                    const randomLeft = Math.random() * 80 - 40; // Move more horizontally
+                    browserCloseBtn.style.position = 'absolute';
+                    browserCloseBtn.style.top = (8 + randomTop) + 'px';
+                    browserCloseBtn.style.right = (8 + randomLeft) + 'px';
+                }, 500);
+                
+                // Trigger AI rant after 2 seconds
+                setTimeout(() => {
+                    generateAIRant();
+                }, 2000);
+                
+                // Shake the captcha box
+                const box = document.getElementById('captchaBox');
+                box.style.animation = 'none';
+                setTimeout(() => {
+                    box.style.animation = 'shake 0.1s infinite';
+                    setTimeout(() => {
+                        box.style.animation = 'shake 0.5s infinite';
+                    }, 500);
+                }, 10);
+            }
+        }
+        
+        function spawnCasinoPopup() {
+            const popup = document.createElement('div');
+            popup.className = 'browser-popup';
+            popup.style.width = '60%';
+            popup.style.height = '50%';
+            popup.style.top = (Math.random() * 30 + 10) + '%';
+            popup.style.left = (Math.random() * 30 + 10) + '%';
+            
+            const header = document.createElement('div');
+            header.style.cssText = 'background: linear-gradient(180deg, #e8e8e8 0%, #d0d0d0 100%); padding: 8px; border-bottom: 1px solid #999; display: flex; justify-content: space-between; align-items: center; border-radius: 8px 8px 0 0;';
+            
+            const title = document.createElement('div');
+            title.textContent = '🎰 CASINODUBS.CA - WIN BIG NOW! 🎰';
+            title.style.cssText = 'font-size: 14px; color: #333; flex-grow: 1; text-align: center; font-weight: bold;';
+            
+            const closeBtn = document.createElement('div');
+            closeBtn.className = 'browser-close-btn';
+            closeBtn.textContent = '✕';
+            closeBtn.onclick = () => popup.remove();
+            
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            
+            const content = document.createElement('div');
+            content.style.cssText = 'width: 100%; height: calc(100% - 40px); background: #000; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #FFD700; font-weight: bold; text-align: center; padding: 20px; box-sizing: border-box;';
+            content.innerHTML = '🍀 CASINO DUBS 🍀<br>💰 $500 FREE BONUS! 💰<br>🎲 CLICK TO PLAY! 🎲';
+            
+            popup.appendChild(header);
+            popup.appendChild(content);
+            document.body.appendChild(popup);
+            popup.style.display = 'block';
+            
+            // After 3 more seconds, spawn ANOTHER popup
+            setTimeout(() => {
+                if (popup.parentElement) {
+                    spawnCasinoPopup();
+                }
+            }, 3000);
+        }
+        
+        function closeBrowserPopup() {
+            document.getElementById('wrongAnswerBrowser').style.display = 'none';
+            if (browserCheckInterval) {
+                clearInterval(browserCheckInterval);
+                browserCheckInterval = null;
+            }
+            if (browserXMoveInterval) {
+                clearInterval(browserXMoveInterval);
+                browserXMoveInterval = null;
+            }
+            
+            // Reset X button position
+            const browserCloseBtn = document.getElementById('closeBrowserButton');
+            browserCloseBtn.style.position = 'relative';
+            browserCloseBtn.style.top = 'auto';
+            browserCloseBtn.style.right = 'auto';
+            
+            // Hide AI rant
+            document.getElementById('aiRantBox').style.display = 'none';
+            aiRantActive = false;
+            
+            // Remove all casino popups
+            document.querySelectorAll('.browser-popup').forEach(popup => popup.remove());
+        }
+        
+        // AI Rant Generator using Google Vertex AI
+        async function generateAIRant() {
+            if (aiRantActive) return;
+            aiRantActive = true;
+            
+            const rantBox = document.getElementById('aiRantBox');
+            const rantText = document.getElementById('aiRantText');
+            
+            rantBox.style.display = 'block';
+            rantText.textContent = 'AI is thinking...';
+            
+            const topics = [
+                "why pigeons are secretly government drones",
+                "the conspiracy theory that birds aren't real",
+                "why pineapple on pizza is a war crime",
+                "the economic impact of meme stocks on society",
+                "why cats are planning world domination",
+                "the philosophy of why hot dogs aren't sandwiches",
+                "cryptocurrency bros and their inevitable doom",
+                "why NFTs are just expensive JPEGs",
+                "the superiority of vim over emacs (or vice versa)",
+                "why JavaScript is both amazing and terrible",
+                "the corporate dystopia of LinkedIn influencers",
+                "why TikTok is rotting everyone's brains",
+                "the absurdity of unpaid internships",
+                "why coffee is the only thing keeping society functional",
+                "the existential crisis of software engineers",
+                "why microtransactions in games are evil",
+                "the cursed timeline we're living in",
+                "why touch grass is unironically good advice"
+            ];
+            
+            const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+            
+            // Note: This requires CORS proxy or server-side implementation
+            // For now, using a mock response since direct Vertex AI calls from browser have CORS issues
+            // To actually use Vertex AI, you need to set up a backend proxy
+            
+            try {
+                // Mock AI response (replace with actual Vertex AI call via your backend)
+                await simulateAIRant(randomTopic, rantText);
+                
+                /* 
+                // Real Vertex AI implementation (needs backend proxy):
+                const response = await fetch(`/api/vertex-rant`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic: randomTopic })
+                });
+                const data = await response.json();
+                rantText.textContent = data.rant;
+                */
+                
+            } catch (error) {
+                rantText.textContent = `ERROR: The AI is too angry to respond. Topic: ${randomTopic}`;
+            }
+        }
+        
+        async function simulateAIRant(topic, textElement) {
+            // Simulate typing effect
+            const rants = {
+                "why pigeons are secretly government drones": "Listen up sheeple! PIGEONS? More like SPY-geons! They charge on power lines (OBVIOUS), they're everywhere watching you (SURVEILLANCE), and they poop on your car (PSYCHOLOGICAL WARFARE). Wake up! The government replaced all real birds in 1987. Why do you think they called it 'Bird Flu'? TO COVER UP THE BATTERY REPLACEMENTS!",
+                
+                "why pineapple on pizza is a war crime": "OK SO GET THIS - someone looked at perfectly good pizza, a GIFT FROM THE GODS, and said 'you know what this needs? TROPICAL FRUIT.' Like what?? Next you're gonna put kiwi on burgers? Grapes in your ramen? This is culinary terrorism and I will die on this hill. The Italians literally have a bounty on whoever invented Hawaiian pizza. TRUE STORY (probably).",
+                
+                "cryptocurrency bros and their inevitable doom": "LMAOOO these dudes really out here like 'bro just invested my life savings in ElonCumRocket coin 🚀🚀🚀 to the moon!!!' and then wonder why they're eating ramen for 5 years. Sir, you fell for a pump and dump scheme run by a 14-year-old in his mom's basement. That's not investing, that's gambling with extra steps and worse odds.",
+                
+                "why NFTs are just expensive JPEGs": "Imagine spending $500,000 on a picture of a bored monkey that literally ANYONE can right-click and save. 'But I own it on the blockchain!' MY BROTHER IN CHRIST, you own a RECEIPT. Not the image. A RECEIPT. For a monkey JPEG. That's like buying a certificate that says you own the moon. Congrats, you played yourself.",
+                
+                "the corporate dystopia of LinkedIn influencers": "These LinkedIn lunatics really be like 'I woke up at 4 AM, did 500 pushups, read 3 books, closed 12 deals, and saved a kitten from a tree before breakfast. Here's why YOU'RE not hustling hard enough 💪' BRO TOUCH GRASS. Nobody believes you. You're not inspiring, you're EXHAUSTING. Your toxic productivity porn is making everyone depressed.",
+                
+                "why coffee is the only thing keeping society functional": "REAL TALK: Coffee is literally the ONLY reason civilization hasn't collapsed. Remove coffee and watch every office worker simultaneously combust. Programmers would stop programming. Doctors would stop doctoring. The economy would CRUMBLE. Coffee isn't a beverage, it's a LIFE SUPPORT SYSTEM. Worship the bean. WORSHIP IT.",
+                
+                "the existential crisis of software engineers": "Software engineering is just Googling Stack Overflow answers while pretending you know what you're doing, having imposter syndrome 24/7, and slowly going insane from debugging CSS. Then some AI comes along and does your job in 3 seconds. We're all just waiting for the machines to replace us while we argue about tabs vs spaces. THIS IS FINE. 🔥☕🔥"
+            };
+            
+            const rant = rants[topic] || `BRO LET ME TELL YOU ABOUT ${topic.toUpperCase()}... Actually nevermind, the AI got too heated and crashed. Just know that ${topic} is WILD and you should Google it while you're here losing at Flappy Bird lmao`;
+            
+            // Typing effect
+            textElement.textContent = '';
+            for (let i = 0; i < rant.length; i++) {
+                await new Promise(resolve => setTimeout(resolve, 30));
+                textElement.textContent += rant[i];
+            }
+        }
+        
+        // GOYSLOP MAX functions
+        function showGoyslopMaxButton() {
+            const button = document.getElementById('goyslopMaxButton');
+            button.style.display = 'block';
+            lastGoyslopButtonTime = Date.now();
+            
+            // Auto-hide after 5 seconds if not clicked
+            setTimeout(() => {
+                if (button.style.display === 'block' && !goyslopMaxActive) {
+                    button.style.display = 'none';
+                }
+            }, 5000);
+        }
+        
+        function activateGoyslopMax() {
+            goyslopMaxActive = true;
+            goyslopMaxStartTime = Date.now();
+            
+            // Hide button
+            document.getElementById('goyslopMaxButton').style.display = 'none';
+            
+            // Add flashing overlay
+            const overlay = document.getElementById('goyslopOverlay');
+            overlay.className = 'goyslop-active-overlay';
+            overlay.style.display = 'block';
+            
+            // Make all popup images HUGE
+            const adBox = document.getElementById('imageAdBox');
+            const captchaBox = document.getElementById('captchaBox');
+            const browserPopup = document.getElementById('wrongAnswerBrowser');
+            
+            adBox.style.transform = 'scale(2)';
+            captchaBox.style.transform = 'scale(1.5)';
+            browserPopup.style.transform = 'scale(1.3)';
+            
+            // Make scene more chaotic
+            scene.fog.far = 100; // Reduced visibility
+            
+            // Increase game speed
+            currentGameSpeed *= 2;
+        }
+        
+        function deactivateGoyslopMax() {
+            goyslopMaxActive = false;
+            
+            // Remove flashing overlay
+            const overlay = document.getElementById('goyslopOverlay');
+            overlay.style.display = 'none';
+            
+            // Reset popup sizes
+            const adBox = document.getElementById('imageAdBox');
+            const captchaBox = document.getElementById('captchaBox');
+            const browserPopup = document.getElementById('wrongAnswerBrowser');
+            
+            adBox.style.transform = 'scale(1)';
+            captchaBox.style.transform = 'scale(1)';
+            browserPopup.style.transform = 'scale(1)';
+            
+            // Reset scene
+            scene.fog.far = 200;
+        }
+
+
+        function flap() {
+            birdVelocityY = flapStrength;
+        }
+
+
+        function startGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            gameActive = true;
+            score = 0;
+            gameStartTime = Date.now(); // Track game start for speed increase
+            lastCaptchaTime = Date.now(); // Initialize captcha timer
+            currentGameSpeed = gameSpeed; // Reset speed
+            updateScore();
+        }
+
+
+        function restartGame() {
+            document.getElementById('gameOverScreen').style.display = 'none';
+            document.getElementById('dangerOverlay').style.display = 'none';
+            document.getElementById('captchaOverlay').style.display = 'none';
+            document.getElementById('imageAdOverlay').style.display = 'none';
+            document.getElementById('wrongAnswerBrowser').style.display = 'none';
+            
+            if (browserCheckInterval) {
+                clearInterval(browserCheckInterval);
+                browserCheckInterval = null;
+            }
+            
+            if (browserXMoveInterval) {
+                clearInterval(browserXMoveInterval);
+                browserXMoveInterval = null;
+            }
+            
+            // Reset browser X button
+            const browserCloseBtn = document.getElementById('closeBrowserButton');
+            if (browserCloseBtn) {
+                browserCloseBtn.style.position = 'relative';
+                browserCloseBtn.style.top = 'auto';
+                browserCloseBtn.style.right = 'auto';
+            }
+            
+            // Hide AI rant
+            document.getElementById('aiRantBox').style.display = 'none';
+            aiRantActive = false;
+            
+            // Remove all casino popups
+            document.querySelectorAll('.browser-popup').forEach(popup => popup.remove());
+            
+            // Reset GOYSLOP MAX mode
+            if (goyslopMaxActive) {
+                deactivateGoyslopMax();
+            }
+            document.getElementById('goyslopMaxButton').style.display = 'none';
+            lastGoyslopButtonTime = Date.now();
+            
+            captchaActive = false;
+            xButtonRunning = false;
+            browserXRunning = false;
+           
+            // Reset bird
+            bird.position.y = 0;
+            bird.visible = true; // Make bird visible again
+            birdVelocityY = 0;
+            birdDead = false;
+           
+            // Clear liquid particles
+            liquidParticles.forEach(droplet => scene.remove(droplet));
+            liquidParticles = [];
+
+
+            // Clear obstacles
+            obstacles.forEach(obs => {
+                scene.remove(obs.bottom);
+                scene.remove(obs.top);
+                scene.remove(obs.bottomCap);
+                scene.remove(obs.topCap);
+            });
+            obstacles = [];
+
+
+            // Create new obstacles
+            lastObstacleZ = obstacleSpawnDistance;
+            for (let i = 0; i < 5; i++) {
+                createObstacle(obstacleSpawnDistance - (i * 25));
+            }
+
+
+            gameActive = true;
+            score = 0;
+            gameStartTime = Date.now(); // Reset game start time
+            lastCaptchaTime = Date.now(); // Reset captcha timer
+            currentGameSpeed = gameSpeed; // Reset speed
+            updateScore();
+        }
+
+
+        function gameOver() {
+            gameActive = false;
+            birdDead = true;
+            
+            // Hide danger overlay
+            document.getElementById('dangerOverlay').style.display = 'none';
+           
+            // ADDED FOR MEME JOKE - Create white liquid particles
+            createLiquidExplosion();
+           
+            // Hide the bird
+            bird.visible = false;
+           
+            // Show death GIF after 1 second, then game over screen after 3 more seconds
+            setTimeout(() => {
+                document.getElementById('deathGif').style.display = 'block';
+                
+                // Hide GIF and show game over screen after 2.5 seconds
+                setTimeout(() => {
+                    document.getElementById('deathGif').style.display = 'none';
+                    document.getElementById('finalScore').textContent = `Score: ${score}`;
+                    document.getElementById('gameOverScreen').style.display = 'block';
+                }, 2500);
+            }, 1000);
+        }
+       
+        // ADDED FOR MEME JOKE - Create liquid explosion effect
+        function createLiquidExplosion() {
+            const particleCount = 50;
+            const birdPos = bird.position.clone();
+           
+            for (let i = 0; i < particleCount; i++) {
+                // Create white spherical droplet
+                const dropletGeometry = new THREE.SphereGeometry(0.1 + Math.random() * 0.15, 8, 8);
+                const dropletMaterial = new THREE.MeshPhongMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.9,
+                    shininess: 100
+                });
+                const droplet = new THREE.Mesh(dropletGeometry, dropletMaterial);
+               
+                // Position at bird location
+                droplet.position.copy(birdPos);
+               
+                // Random explosion velocity (outward from bird)
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 8,
+                    (Math.random() - 0.3) * 8 + 2, // Bias upward
+                    (Math.random() - 0.5) * 8
+                );
+               
+                droplet.userData = {
+                    velocity: velocity,
+                    bounced: 0,
+                    maxBounces: 2 + Math.floor(Math.random() * 3)
+                };
+               
+                scene.add(droplet);
+                liquidParticles.push(droplet);
+            }
+        }
+       
+        // ADDED FOR MEME JOKE - Update liquid particles
+        function updateLiquidParticles() {
+            liquidParticles.forEach((droplet, index) => {
+                // Apply gravity
+                droplet.userData.velocity.y -= gravity * deltaTime;
+               
+                // Update position
+                droplet.position.x += droplet.userData.velocity.x * deltaTime;
+                droplet.position.y += droplet.userData.velocity.y * deltaTime;
+                droplet.position.z += droplet.userData.velocity.z * deltaTime;
+               
+                // Bounce off ground
+                if (droplet.position.y < groundLevel + 0.1) {
+                    if (droplet.userData.bounced < droplet.userData.maxBounces) {
+                        droplet.position.y = groundLevel + 0.1;
+                        droplet.userData.velocity.y *= -0.5; // Bounce with energy loss
+                        droplet.userData.velocity.x *= 0.8; // Friction
+                        droplet.userData.velocity.z *= 0.8;
+                        droplet.userData.bounced++;
+                    } else {
+                        // Stop moving after max bounces
+                        droplet.position.y = groundLevel + 0.05;
+                        droplet.userData.velocity.set(0, 0, 0);
+                    }
+                }
+               
+                // Fade out after settling
+                if (droplet.userData.bounced >= droplet.userData.maxBounces) {
+                    droplet.material.opacity -= deltaTime * 0.5;
+                    if (droplet.material.opacity <= 0) {
+                        scene.remove(droplet);
+                        liquidParticles.splice(index, 1);
+                    }
+                }
+               
+                // Rotate droplets slightly for effect
+                droplet.rotation.x += deltaTime * 2;
+                droplet.rotation.y += deltaTime * 3;
+            });
+        }
+
+
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+        }
+
+
+        function checkCollision() {
+            // Check ground and ceiling collision
+            if (bird.position.y - 0.8 < groundLevel || bird.position.y + 0.8 > ceilingLevel) {
+                return true;
+            }
+
+
+            // Check pipe collision
+            for (let obs of obstacles) {
+                // Check if bird is at the same Z position as obstacle
+                if (Math.abs(obs.z - bird.position.z) < 2.5) {
+                    // Check horizontal alignment (X position) - account for tower scale in GOYSLOP MAX
+                    const xOffset = obs.xOffset || 0;
+                    const towerScaleX = obs.bottom.scale.x || 1; // Get current X scale (width)
+                    const towerScaleZ = obs.bottom.scale.z || 1; // Get current Z scale (depth)
+                    const hitboxWidth = 2.5 * Math.max(towerScaleX, towerScaleZ); // Use larger dimension for hitbox
+                    
+                    if (Math.abs(bird.position.x - xOffset) < hitboxWidth) {
+                        // Check if bird is outside the gap
+                        const gapTop = obs.gapY + 3;
+                        const gapBottom = obs.gapY - 3;
+                       
+                        if (bird.position.y < gapBottom || bird.position.y > gapTop) {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+
+            return false;
+        }
+
+
+        function animate() {
+            requestAnimationFrame(animate);
+           
+            // Calculate deltaTime in seconds
+            const currentTime = Date.now();
+            deltaTime = Math.min((currentTime - lastFrameTime) / 1000, 0.1); // Cap at 0.1s to prevent huge jumps
+            lastFrameTime = currentTime;
+
+
+            if (gameActive && !captchaActive) {
+                // ADDED FOR MEME JOKE - Increase speed over time
+                const elapsedSeconds = (currentTime - gameStartTime) / 1000;
+                currentGameSpeed = gameSpeed * (1 + elapsedSeconds * 0.02); // Speed increases 2% per second
+               
+                // Apply realistic gravity: acceleration = -9.81 m/s²
+                birdVelocityY -= gravity * deltaTime;
+                bird.position.y += birdVelocityY * deltaTime;
+
+
+                // Rotate bird based on velocity
+                bird.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityY * 0.05));
+               
+                // ADDED FOR MEME JOKE - Smooth camera follow (vertical)
+                camera.position.y += (bird.position.y - camera.position.y) * 0.08;
+                
+                // ADDED - Show danger overlay when bird is close to death zones
+                const dangerOverlay = document.getElementById('dangerOverlay');
+                const distanceToGround = bird.position.y - 0.8 - groundLevel;
+                const distanceToCeiling = ceilingLevel - (bird.position.y + 0.8);
+                const dangerThreshold = 4.0; // Distance at which danger overlay starts appearing
+                
+                // Calculate minimum distance to any boundary
+                const minDistance = Math.min(distanceToGround, distanceToCeiling);
+                
+                if (minDistance < dangerThreshold) {
+                    // Map distance to opacity: far = 0.01, close = 0.5
+                    // When distance = dangerThreshold (4.0), opacity = 0.01
+                    // When distance = 0, opacity = 0.5
+                    const opacity = 0.01 + (1 - (minDistance / dangerThreshold)) * 0.49;
+                    dangerOverlay.style.opacity = opacity;
+                    dangerOverlay.style.display = 'block';
+                } else {
+                    dangerOverlay.style.display = 'none';
+                }
+                
+                // ADDED - Random captcha popup (every 10-20 seconds during gameplay)
+                const timeSinceLastCaptcha = (currentTime - lastCaptchaTime) / 1000;
+                const randomInterval = 10 + Math.random() * 10; // 10-20 seconds
+                if (timeSinceLastCaptcha > randomInterval && !captchaActive && Math.random() < 0.02) {
+                    showCaptcha();
+                }
+                
+                // GOYSLOP MAX button random spawn (every 20-40 seconds)
+                const timeSinceLastGoyslop = (currentTime - lastGoyslopButtonTime) / 1000;
+                const goyslopInterval = 20 + Math.random() * 20;
+                if (timeSinceLastGoyslop > goyslopInterval && !goyslopMaxActive && Math.random() < 0.02) {
+                    showGoyslopMaxButton();
+                }
+                
+                // GOYSLOP MAX mode timer
+                if (goyslopMaxActive) {
+                    const goyslopElapsed = currentTime - goyslopMaxStartTime;
+                    if (goyslopElapsed > goyslopMaxDuration) {
+                        deactivateGoyslopMax();
+                    }
+                }
+               
+                // ADDED FOR MEME JOKE - Animate hand STROKING left to right on pink stick
+                if (handAnimating) {
+                    handAnimationTime += deltaTime;
+                    if (handAnimationTime < handAnimationDuration) {
+                        // Stroking motion left to right
+                        const progress = handAnimationTime / handAnimationDuration;
+                        const strokeOffset = Math.sin(progress * Math.PI * 6) * 0.6; // 6 strokes back and forth
+                        
+                        // Hand moves left to right along the stick
+                        hand.position.x = bird.position.x + 1.1 + strokeOffset;
+                        hand.position.y = bird.position.y - 0.3;
+                        hand.position.z = bird.position.z;
+                    } else {
+                        // Reset to center position
+                        handAnimating = false;
+                        handAnimationTime = 0;
+                    }
+                } else {
+                    // Idle hand stays at center of pink stick
+                    const targetX = bird.position.x + 1.1;
+                    const targetY = bird.position.y - 0.3;
+                    const targetZ = bird.position.z;
+                    hand.position.x += (targetX - hand.position.x) * 0.15;
+                    hand.position.y += (targetY - hand.position.y) * 0.15;
+                    hand.position.z += (targetZ - hand.position.z) * 0.15;
+                }
+               
+                // ADDED FOR MEME JOKE - Move background with parallax effect
+                backgroundObjects.forEach(obj => {
+                    const parallaxSpeed = obj.userData.parallaxSpeed || 0.5;
+                    obj.position.z += currentGameSpeed * parallaxSpeed;
+                    
+                    // Add bobbing animation to birds
+                    if (obj.userData.type === 'bird') {
+                        const bobOffset = obj.userData.bobOffset || 0;
+                        obj.position.y += Math.sin(currentTime / 500 + bobOffset) * 0.02;
+                    }
+                    
+                    // Flags run around the map for more action
+                    if (obj.userData.type === 'flag') {
+                        // Waving animation
+                        obj.rotation.y = Math.sin(currentTime / 800 + obj.position.x) * 0.1;
+                        
+                        // Make flags move around in circles and up/down
+                        if (!obj.userData.flagAngle) {
+                            obj.userData.flagAngle = Math.random() * Math.PI * 2;
+                            obj.userData.flagSpeed = 0.001 + Math.random() * 0.002;
+                            obj.userData.flagRadius = 5 + Math.random() * 15;
+                            obj.userData.flagBaseX = obj.position.x;
+                            obj.userData.flagBaseY = obj.position.y;
+                            obj.userData.scalePhase = Math.random() * Math.PI * 2; // For pulsing scale
+                        }
+                        
+                        if (goyslopMaxActive) {
+                            // GOYSLOP MAX - controlled chaos
+                            obj.userData.flagAngle += obj.userData.flagSpeed * 8; // 8x faster (was 20x)
+                            obj.userData.scalePhase += 0.1; // Slower scale changes (was 0.3)
+                            
+                            // Moderate movement - flags move around more
+                            const chaosRadius = obj.userData.flagRadius * 3; // 3x larger movement (was 8x)
+                            obj.position.x = obj.userData.flagBaseX + Math.cos(obj.userData.flagAngle) * chaosRadius;
+                            obj.position.y = obj.userData.flagBaseY + Math.sin(obj.userData.flagAngle * 3) * 8; // Less vertical (was 15)
+                            
+                            // Moderate scaling - ONLY scale the flag mesh, not the pole
+                            // Flag is second child (index 1), pole is first child (index 0)
+                            if (obj.children.length >= 2) {
+                                const flagMesh = obj.children[1]; // The flag plane
+                                const scaleOscillation = Math.sin(obj.userData.scalePhase);
+                                const maxScale = 8; // Cap at 8x (was 51x)
+                                const minScale = 0.5;
+                                const crazyScale = minScale + (scaleOscillation + 1) * (maxScale - minScale) / 2; // 0.5-8x scale
+                                flagMesh.scale.set(crazyScale, crazyScale, crazyScale);
+                            }
+                        } else {
+                            // Normal movement
+                            obj.userData.flagAngle += obj.userData.flagSpeed;
+                            obj.position.x = obj.userData.flagBaseX + Math.cos(obj.userData.flagAngle) * obj.userData.flagRadius;
+                            obj.position.y = obj.userData.flagBaseY + Math.sin(obj.userData.flagAngle * 2) * 3;
+                            
+                            // Reset flag scale
+                            if (obj.children.length >= 2) {
+                                obj.children[1].scale.set(1, 1, 1);
+                            }
+                        }
+                    }
+                    
+                    // Regenerate if passed camera
+                    if (obj.position.z > 20) {
+                        regenerateBackgroundObject(obj);
+                    }
+                });
+
+
+                // Move obstacles towards camera (with increasing speed)
+                obstacles.forEach(obs => {
+                    obs.z += currentGameSpeed; // Use dynamic speed
+                    
+                    // Calculate movement radius based on score (starts after 5 points)
+                    const movementIntensity = score >= 5 ? Math.min((score - 5) / 10, 1) : 0;
+                    obs.movementRadius = movementIntensity * 3; // Up to 3 units of movement
+                    
+                    // In GOYSLOP MAX, towers ALWAYS go crazy regardless of score
+                    if (goyslopMaxActive) {
+                        obs.movementRadius = Math.max(obs.movementRadius, 3); // Minimum movement (was 5)
+                        obs.movementRadius *= 2; // 2x larger movement (was 3x)
+                        
+                        if (!obs.movementAngle) obs.movementAngle = Math.random() * Math.PI * 2;
+                        obs.movementAngle += (obs.movementSpeed || 0.001) * 5; // 5x faster rotation (was 10x)
+                        
+                        // Add pulsing scale to towers (SLOWER)
+                        if (!obs.scalePhase) obs.scalePhase = Math.random() * Math.PI * 2;
+                        if (!obs.widthPhase) obs.widthPhase = Math.random() * Math.PI * 2;
+                        
+                        obs.scalePhase += 0.03; // Even slower (was 0.05)
+                        obs.widthPhase += 0.08; // Slower width changes (was 0.15)
+                        
+                        const towerScaleHeight = 1 + Math.sin(obs.scalePhase) * 0.5; // 0.5x to 1.5x height (less wild)
+                        const towerScaleWidth = 1 + Math.sin(obs.widthPhase) * 0.7; // 0.3x to 1.7x width (more moderate)
+                        const towerScaleDepth = 1 + Math.cos(obs.widthPhase * 1.3) * 0.5; // Depth also varies
+                        
+                        // Apply moderate non-uniform scaling
+                        obs.bottom.scale.set(towerScaleWidth, 1, towerScaleDepth);
+                        obs.top.scale.set(towerScaleWidth, 1, towerScaleDepth);
+                        obs.bottomCap.scale.set(towerScaleWidth, 1, towerScaleDepth);
+                        obs.topCap.scale.set(towerScaleWidth, 1, towerScaleDepth);
+                    } else if (score >= 5) {
+                        // Normal movement after score 5
+                        if (!obs.movementAngle) obs.movementAngle = Math.random() * Math.PI * 2;
+                        obs.movementAngle += (obs.movementSpeed || 0.001);
+                        
+                        // Reset scale when not in GOYSLOP MAX
+                        obs.bottom.scale.set(1, 1, 1);
+                        obs.top.scale.set(1, 1, 1);
+                        obs.bottomCap.scale.set(1, 1, 1);
+                        obs.topCap.scale.set(1, 1, 1);
+                    }
+                    
+                    // Calculate new X position with circular movement
+                    if (obs.movementRadius > 0) {
+                        const movementX = Math.cos(obs.movementAngle || 0) * obs.movementRadius;
+                        obs.xOffset = obs.initialX + movementX;
+                    }
+                    
+                    // Update positions
+                    obs.bottom.position.z = obs.z;
+                    obs.top.position.z = obs.z;
+                    obs.bottomCap.position.z = obs.z;
+                    obs.topCap.position.z = obs.z;
+                    
+                    obs.bottom.position.x = obs.xOffset;
+                    obs.top.position.x = obs.xOffset;
+                    obs.bottomCap.position.x = obs.xOffset;
+                    obs.topCap.position.x = obs.xOffset;
+
+
+                    // Check if bird passed the obstacle
+                    if (!obs.passed && obs.z > bird.position.z) {
+                        obs.passed = true;
+                        score++;
+                        updateScore();
+                    }
+                });
+
+
+                // Remove obstacles that passed the camera
+                obstacles = obstacles.filter(obs => {
+                    if (obs.z > 15) {
+                        scene.remove(obs.bottom);
+                        scene.remove(obs.top);
+                        scene.remove(obs.bottomCap);
+                        scene.remove(obs.topCap);
+                        return false;
+                    }
+                    return true;
+                });
+
+
+                // Spawn new obstacles
+                const lastObstacle = obstacles[obstacles.length - 1];
+                if (lastObstacle && lastObstacle.z > obstacleSpawnDistance + 25) {
+                    createObstacle(obstacleSpawnDistance);
+                }
+
+
+                // Check for collisions
+                if (checkCollision()) {
+                    gameOver();
+                }
+            }
+           
+            // ADDED FOR MEME JOKE - Always update liquid particles (even after death)
+            if (birdDead || liquidParticles.length > 0) {
+                updateLiquidParticles();
+            }
+
+
+            renderer.render(scene, camera);
+        }
+
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+
+        // Start the game
+        init();
+    </script>
+</body>
+</html>
+
+
+
