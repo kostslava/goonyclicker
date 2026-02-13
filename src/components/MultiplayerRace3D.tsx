@@ -545,7 +545,12 @@ export default function MultiplayerRace3D() {
   const initHandTracking = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } } // Reduced from 640x480
+        video: { 
+          facingMode: 'user', 
+          width: { ideal: 480 }, 
+          height: { ideal: 480 },
+          aspectRatio: { ideal: 1.0 } // Request square aspect ratio for MediaPipe
+        }
       });
       
       if (videoRef.current) {
@@ -1153,7 +1158,7 @@ export default function MultiplayerRace3D() {
 
   return (
     <div className="relative min-h-screen w-full bg-black flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '320px', height: '240px' }} />
+      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '480px', height: '480px' }} />
       
       {/* Game Canvas */}
       <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
