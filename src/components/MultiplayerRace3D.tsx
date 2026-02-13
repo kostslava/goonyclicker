@@ -195,7 +195,7 @@ export default function MultiplayerRace3D() {
       
       setError(''); // Clear any error messages
       
-      // Store shared start time from server
+      // Store shared start time from server (THIS IS THE AUTHORITATIVE GAME TIME)
       sharedStartTimeRef.current = startTime;
       
       // Start countdown
@@ -208,12 +208,13 @@ export default function MultiplayerRace3D() {
             
             // Start the game running
             isGameRunningRef.current = true;
-            gameStartTimeRef.current = performance.now();
+            // Calculate exact game start time based on server time + countdown duration
+            gameStartTimeRef.current = startTime + 3000; // Server time + 3 second countdown
             
             // Start timer that calculates from shared server time
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             timerIntervalRef.current = setInterval(() => {
-              const elapsedMs = Date.now() - sharedStartTimeRef.current;
+              const elapsedMs = Date.now() - gameStartTimeRef.current;
               const elapsedSeconds = Math.floor(elapsedMs / 1000);
               const remaining = Math.max(0, timeLimitRef.current - elapsedSeconds);
               
@@ -852,10 +853,13 @@ export default function MultiplayerRace3D() {
         }
       }
       
+      // Calculate deterministic elapsed time from authoritative server-synchronized game start
+      const elapsedGameTimeMs = Date.now() - gameStartTimeRef.current;
+      const elapsedGameTimeSec = elapsedGameTimeMs / 1000;
+      
       // Pipe reveal logic - synchronized across all clients based on game time
       if (isRoomCreatorRef.current && socketRef.current && roomCodeRef.current) {
-        const elapsedTime = (performance.now() - gameStartTimeRef.current) / 1000; // seconds
-        const pipesToReveal = Math.floor(elapsedTime / 0.67); // Reveal one pipe every 0.67 seconds (100 frames at ~60fps)
+        const pipesToReveal = Math.floor(elapsedGameTimeSec / 0.67); // Reveal one pipe every 0.67 seconds
         
         if (pipesToReveal > revealedPipeIndexRef.current && pipesToReveal < 30) {
           revealedPipeIndexRef.current = pipesToReveal;
@@ -875,10 +879,15 @@ export default function MultiplayerRace3D() {
         }
       }
       
-      // Update pipes - using timeScale for consistent movement
+      // Update pipes - using DETERMINISTIC position calculation (no accumulation)
+      // ALL clients calculate the exact same position based on elapsed game time
       for (let i = pipesRef.current.length - 1; i >= 0; i--) {
         const pipe = pipesRef.current[i];
-        pipe.z += pipeSpeedRef.current * timeScale;
+        
+        // Each pipe starts at -25 - i*25 and moves forward at pipeSpeed
+        const initialZ = -25 - i * 25;
+        const travelDistance = pipeSpeedRef.current * elapsedGameTimeSec * 60; // Normalize to 60 FPS equivalent
+        pipe.z = initialZ + travelDistance;
         
         // Update pipe positions - keep them centered on player's X position
         pipe.bottom.position.set(xOffset, pipe.bottom.position.y, pipe.z);
