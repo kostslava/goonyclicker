@@ -34,6 +34,7 @@ interface Pipe {
 interface OpponentBird {
   mesh: THREE.Group;
   y: number;
+  targetY: number;
   isAlive: boolean;
 }
 
@@ -67,6 +68,8 @@ export default function MultiplayerRace3D() {
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const repStateRef = useRef<'waiting' | 'up' | 'down'>('waiting');
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPositionUpdateRef = useRef<number>(0);
+  const isRoomCreatorRef = useRef<boolean>(false);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -102,6 +105,7 @@ export default function MultiplayerRace3D() {
       setMyPlayerId(playerId);
       setPlayers(players || []);
       setIsCreator(true);
+      isRoomCreatorRef.current = true;
       setGameState('lobby');
     });
 
@@ -203,15 +207,60 @@ export default function MultiplayerRace3D() {
           bird.position.x = xOffset;
         }
         
-        opponent = { mesh: bird, y, isAlive };
+        opponent = { mesh: bird, y, targetY: y, isAlive };
         opponents.set(playerId, opponent);
       }
       
       if (opponent) {
-        opponent.y = y;
+        // Set target position for interpolation
+        opponent.targetY = y;
         opponent.isAlive = isAlive;
         opponent.mesh.visible = isAlive;
       }
+    });
+
+    newSocket.on('pipe-generated', ({ zPosition, gapY, width }) => {
+      // Received synchronized pipe from creator
+      if (!sceneRef.current) return;
+      
+      const pipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+      
+      // Bottom pipe
+      const bottomHeight = gapY - GROUND_LEVEL - PIPE_GAP / 2;
+      const bottomGeometry = new THREE.BoxGeometry(width, bottomHeight, width);
+      const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
+      bottomPipe.position.set(0, GROUND_LEVEL + bottomHeight / 2, zPosition);
+      sceneRef.current.add(bottomPipe);
+      
+      // Top pipe
+      const topHeight = CEILING_LEVEL - gapY - PIPE_GAP / 2;
+      const topGeometry = new THREE.BoxGeometry(width, topHeight, width);
+      const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
+      topPipe.position.set(0, gapY + PIPE_GAP / 2 + topHeight / 2, zPosition);
+      sceneRef.current.add(topPipe);
+      
+      // Caps
+      const capGeometry = new THREE.BoxGeometry(width + 1, 0.5, width + 1);
+      const capMaterial = new THREE.MeshPhongMaterial({ color: 0x006400 });
+      
+      const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
+      bottomCap.position.set(0, gapY - PIPE_GAP / 2, zPosition);
+      sceneRef.current.add(bottomCap);
+      
+      const topCap = new THREE.Mesh(capGeometry, capMaterial);
+      topCap.position.set(0, gapY + PIPE_GAP / 2, zPosition);
+      sceneRef.current.add(topCap);
+      
+      pipesRef.current.push({
+        bottom: bottomPipe,
+        top: topPipe,
+        bottomCap,
+        topCap,
+        z: zPosition,
+        passed: false,
+        gapY,
+        width
+      });
     });
 
     newSocket.on('player-died', ({ playerId }) => {
@@ -423,6 +472,16 @@ export default function MultiplayerRace3D() {
     const numPlayers = players.length || 1;
     const pipeWidth = Math.max(PIPE_WIDTH, numPlayers * 3 + 3);
     
+    // If this is the room creator, broadcast pipe data to sync with other players
+    if (isRoomCreatorRef.current && socketRef.current && roomCodeRef.current) {
+      socketRef.current.emit('generate-pipe', {
+        roomCode: roomCodeRef.current,
+        zPosition,
+        gapY: gapPosition,
+        width: pipeWidth
+      });
+    }
+    
     // Bottom pipe
     const bottomHeight = gapPosition - GROUND_LEVEL - PIPE_GAP / 2;
     const bottomGeometry = new THREE.BoxGeometry(pipeWidth, bottomHeight, pipeWidth);
@@ -571,8 +630,8 @@ export default function MultiplayerRace3D() {
   const updateGame = () => {
     if (!birdRef.current || !sceneRef.current || !cameraRef.current) return;
     
-    // Only process player physics and input if player is alive
-    if (!gameOverRef.current) {
+    // Only process player physics and input if player is alive AND game is running
+    if (!gameOverRef.current && isGameRunningRef.current) {
       // Hand detection every frame for better responsiveness
       if (
         videoRef.current &&
@@ -616,7 +675,7 @@ export default function MultiplayerRace3D() {
       birdYRef.current += birdVelocityRef.current * 0.01;
       birdRef.current.position.y = birdYRef.current;
       birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
-    } else {
+    } else if (gameOverRef.current) {
       // Death animation - make bird fall and fade
       birdVelocityRef.current += GRAVITY * 1.5; // Fall faster when dead
       birdYRef.current += birdVelocityRef.current * 0.01;
@@ -642,10 +701,20 @@ export default function MultiplayerRace3D() {
     const xOffset = playerIndex * spacing - totalWidth / 2;
     birdRef.current.position.x = xOffset;
     
-    // Update opponent birds positions first
+    // Ensure bird stays at Y=0 during countdown (when game not running)
+    if (!isGameRunningRef.current && !gameOverRef.current) {
+      birdRef.current.position.y = 0;
+      birdYRef.current = 0;
+      birdVelocityRef.current = 0;
+    }
+    
+    // Update opponent birds positions with interpolation for smooth movement
     opponentBirdsRef.current.forEach((opponent, playerId) => {
       const opponentIndex = players.findIndex(p => p.id === playerId);
       const opponentXOffset = opponentIndex * spacing - totalWidth / 2;
+      
+      // Smooth interpolation for Y position (lerp with factor 0.3 for responsiveness)
+      opponent.y += (opponent.targetY - opponent.y) * 0.3;
       opponent.mesh.position.set(opponentXOffset, opponent.y, 0);
     });
     
@@ -685,70 +754,23 @@ export default function MultiplayerRace3D() {
       spectatingRef.current = false;
     }
     
-    // Broadcast position every frame for real-time sync
-    if (socketRef.current && roomCodeRef.current) {
+    // Broadcast position at max 25ms intervals (40 FPS) for smooth real-time sync
+    // Only broadcast when game is actually running to reduce network traffic during countdown
+    const now = performance.now();
+    if (isGameRunningRef.current && socketRef.current && roomCodeRef.current && now - lastPositionUpdateRef.current >= 25) {
       socketRef.current.emit('update-position', {
         roomCode: roomCodeRef.current,
         y: birdYRef.current,
         isAlive: !gameOverRef.current
       });
+      lastPositionUpdateRef.current = now;
     }
     
-    // Bounds check (only for alive players)
-    if (!gameOverRef.current) {
-      if (birdYRef.current > CEILING_LEVEL - 0.8 || birdYRef.current < GROUND_LEVEL + 0.8) {
-        gameOverRef.current = true;
-        setIsDead(true);
-        if (socketRef.current && roomCodeRef.current) {
-          socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
-        }
-      }
-    }
-    
-    // Pipe generation (only when alive)
-    frameCountRef.current++;
-    if (!gameOverRef.current && frameCountRef.current % 100 === 0) {
-      lastObstacleZRef.current -= 25;
-      createObstacle(lastObstacleZRef.current);
-    }
-    
-    // Update pipes
-    for (let i = pipesRef.current.length - 1; i >= 0; i--) {
-      const pipe = pipesRef.current[i];
-      pipe.z += PIPE_SPEED;
-      pipe.bottom.position.z = pipe.z;
-      pipe.top.position.z = pipe.z;
-      pipe.bottomCap.position.z = pipe.z;
-      pipe.topCap.position.z = pipe.z;
-      
-      // Score check (only for alive players)
-      if (!gameOverRef.current && !pipe.passed && pipe.z > 0) {
-        pipe.passed = true;
-        const newScore = myScore + 1;
-        setMyScore(newScore);
-        
-        if (socketRef.current && roomCodeRef.current) {
-          socketRef.current.emit('update-score', { 
-            roomCode: roomCodeRef.current, 
-            score: newScore 
-          });
-        }
-      }
-      
-      // Collision check (only for alive players)
-      if (!gameOverRef.current && pipe.z > -2.5 && pipe.z < 2.5) {
-        const BIRD_RADIUS = 0.8;
-        const birdX = birdRef.current.position.x;
-        const birdY = birdYRef.current;
-        
-        // Check if bird is within pipe's X bounds (accounting for bird radius)
-        const isInPipeXRange = Math.abs(birdX) < pipe.width / 2 + BIRD_RADIUS;
-        
-        // Check if bird is outside the gap vertically (accounting for bird radius)
-        const isOutsideGap = birdY < pipe.gapY - PIPE_GAP / 2 + BIRD_RADIUS || 
-                             birdY > pipe.gapY + PIPE_GAP / 2 - BIRD_RADIUS;
-        
-        if (isInPipeXRange && isOutsideGap) {
+    // Only update game state when game is running (after countdown)
+    if (isGameRunningRef.current) {
+      // Bounds check (only for alive players)
+      if (!gameOverRef.current) {
+        if (birdYRef.current > CEILING_LEVEL - 0.8 || birdYRef.current < GROUND_LEVEL + 0.8) {
           gameOverRef.current = true;
           setIsDead(true);
           if (socketRef.current && roomCodeRef.current) {
@@ -757,13 +779,66 @@ export default function MultiplayerRace3D() {
         }
       }
       
-      // Remove off-screen pipes
-      if (pipe.z > 20) {
-        sceneRef.current?.remove(pipe.bottom);
-        sceneRef.current?.remove(pipe.top);
-        sceneRef.current?.remove(pipe.bottomCap);
-        sceneRef.current?.remove(pipe.topCap);
-        pipesRef.current.splice(i, 1);
+      // Pipe generation (only when alive)
+      frameCountRef.current++;
+      if (!gameOverRef.current && frameCountRef.current % 100 === 0) {
+        lastObstacleZRef.current -= 25;
+        createObstacle(lastObstacleZRef.current);
+      }
+      
+      // Update pipes
+      for (let i = pipesRef.current.length - 1; i >= 0; i--) {
+        const pipe = pipesRef.current[i];
+        pipe.z += PIPE_SPEED;
+        pipe.bottom.position.z = pipe.z;
+        pipe.top.position.z = pipe.z;
+        pipe.bottomCap.position.z = pipe.z;
+        pipe.topCap.position.z = pipe.z;
+        
+        // Score check (only for alive players)
+        if (!gameOverRef.current && !pipe.passed && pipe.z > 0) {
+          pipe.passed = true;
+          const newScore = myScore + 1;
+          setMyScore(newScore);
+          
+          if (socketRef.current && roomCodeRef.current) {
+            socketRef.current.emit('update-score', { 
+              roomCode: roomCodeRef.current, 
+              score: newScore 
+            });
+          }
+        }
+        
+        // Collision check (only for alive players)
+        if (!gameOverRef.current && pipe.z > -2.5 && pipe.z < 2.5) {
+          const BIRD_RADIUS = 0.8;
+          const birdX = birdRef.current.position.x;
+          const birdY = birdYRef.current;
+          
+          // Check if bird is within pipe's X bounds (accounting for bird radius)
+          const isInPipeXRange = Math.abs(birdX) < pipe.width / 2 + BIRD_RADIUS;
+          
+          // Check if bird is outside the gap vertically (accounting for bird radius)
+          const isOutsideGap = birdY < pipe.gapY - PIPE_GAP / 2 + BIRD_RADIUS || 
+                               birdY > pipe.gapY + PIPE_GAP / 2 - BIRD_RADIUS;
+          
+          if (isInPipeXRange && isOutsideGap) {
+            gameOverRef.current = true;
+            setIsDead(true);
+            if (socketRef.current && roomCodeRef.current) {
+              socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
+            }
+          }
+        }
+        
+        // Remove off-screen pipes
+        if (pipe.z > 20) {
+          sceneRef.current?.remove(pipe.bottom);
+          sceneRef.current?.remove(pipe.top);
+          sceneRef.current?.remove(pipe.bottomCap);
+          sceneRef.current?.remove(pipe.topCap);
+          pipesRef.current.splice(i, 1);
+        }
       }
     }
   };
@@ -988,7 +1063,7 @@ export default function MultiplayerRace3D() {
       </div>
       
       {/* Scoreboard */}
-      <div className="absolute top-4 left-4 bg-black bg-opacity-70 px-4 py-3 rounded-lg border-2 border-cyan-500">
+      <div className="absolute top-4 left-4 bg-black bg-opacity-80 px-4 py-3 rounded-lg border-2 border-cyan-500 z-20">
         {players.map((player) => (
           <p key={player.id} className="text-xl font-bold" style={{ color: player.id === myPlayerId ? '#00f5ff' : '#ffffff' }}>
             {player.name}: {player.score}
@@ -997,9 +1072,9 @@ export default function MultiplayerRace3D() {
         ))}
       </div>
       
-      {/* Timer */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 px-6 py-3 rounded-lg border-2 border-cyan-500">
-        <p className="text-4xl font-bold text-cyan-400">
+      {/* Timer - Highly visible */}
+      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-90 px-8 py-4 rounded-lg border-4 border-cyan-400 z-30" style={{ boxShadow: '0 0 25px rgba(0, 245, 255, 0.8)' }}>
+        <p className="text-5xl font-bold text-cyan-400" style={{ textShadow: '0 0 15px #00f5ff, 0 0 30px #00f5ff' }}>
           {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
         </p>
       </div>

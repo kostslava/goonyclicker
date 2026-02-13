@@ -146,6 +146,18 @@ app.prepare().then(() => {
       });
     });
 
+    socket.on('generate-pipe', ({ roomCode, zPosition, gapY, width }) => {
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Broadcast pipe generation to all other players in room
+      socket.to(roomCode).emit('pipe-generated', { 
+        zPosition,
+        gapY,
+        width
+      });
+    });
+
     socket.on('player-died', ({ roomCode }) => {
       console.log(`Player died: ${socket.id} in room ${roomCode}`);
       const room = rooms.get(roomCode);
