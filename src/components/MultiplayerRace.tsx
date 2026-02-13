@@ -54,6 +54,7 @@ export default function MultiplayerRace() {
   const pipesRef = useRef<Pipe[]>([]);
   const gameOverRef = useRef(false);
   const frameCountRef = useRef(0);
+  const isGameRunningRef = useRef(false);
 
   // Init Socket.io
   useEffect(() => {
@@ -117,7 +118,9 @@ export default function MultiplayerRace() {
       console.log('Game over! Winner:', winner);
       setWinner(winner);
       setGameState('winner');
+      isGameRunningRef.current = false;
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     });
 
     newSocket.on('error', (msg) => {
@@ -126,7 +129,9 @@ export default function MultiplayerRace() {
     });
 
     return () => {
+      isGameRunningRef.current = false;
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       newSocket.close();
     };
   }, []);
@@ -178,10 +183,11 @@ export default function MultiplayerRace() {
     pipesRef.current = [];
     gameOverRef.current = false;
     frameCountRef.current = 0;
+    isGameRunningRef.current = true;
     setMyScore(0);
     
     const gameLoop = () => {
-      if (gameState !== 'racing') return;
+      if (!isGameRunningRef.current) return;
       
       updateGame();
       drawGame();
