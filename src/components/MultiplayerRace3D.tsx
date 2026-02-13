@@ -6,8 +6,8 @@ import * as THREE from 'three';
 
 const MOVEMENT_THRESHOLD = 0.02;
 const DEFAULT_TIME_LIMIT = 120;
-const GRAVITY = 0.5;
-const FLAP_STRENGTH = -10;
+const GRAVITY = -0.5;
+const FLAP_STRENGTH = 10;
 const PIPE_SPEED = 0.15;
 const PIPE_GAP = 5.5;
 const PIPE_WIDTH = 6;
@@ -28,6 +28,7 @@ interface Pipe {
   z: number;
   passed: boolean;
   gapY: number;
+  width: number;
 }
 
 interface OpponentBird {
@@ -88,11 +89,12 @@ export default function MultiplayerRace3D() {
       setMyPlayerId(newSocket.id || '');
     });
 
-    newSocket.on('room-created', ({ roomCode, playerId }) => {
+    newSocket.on('room-created', ({ roomCode, playerId, players }) => {
       console.log('Room created:', roomCode, 'Player ID:', playerId);
       setRoomCode(roomCode);
       roomCodeRef.current = roomCode;
       setMyPlayerId(playerId);
+      setPlayers(players || []);
       setIsCreator(true);
       setGameState('lobby');
     });
@@ -276,9 +278,13 @@ export default function MultiplayerRace3D() {
     
     const gapPosition = GROUND_LEVEL + 2 + Math.random() * 5;
     
+    // Calculate pipe width based on number of players
+    const numPlayers = players.length || 1;
+    const pipeWidth = Math.max(PIPE_WIDTH, numPlayers * 3 + 3);
+    
     // Bottom pipe
     const bottomHeight = gapPosition - GROUND_LEVEL - PIPE_GAP / 2;
-    const bottomGeometry = new THREE.BoxGeometry(PIPE_WIDTH, bottomHeight, PIPE_WIDTH);
+    const bottomGeometry = new THREE.BoxGeometry(pipeWidth, bottomHeight, pipeWidth);
     const pipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
     const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
     bottomPipe.position.set(0, GROUND_LEVEL + bottomHeight / 2, zPosition);
@@ -286,13 +292,13 @@ export default function MultiplayerRace3D() {
     
     // Top pipe
     const topHeight = CEILING_LEVEL - gapPosition - PIPE_GAP / 2;
-    const topGeometry = new THREE.BoxGeometry(PIPE_WIDTH, topHeight, PIPE_WIDTH);
+    const topGeometry = new THREE.BoxGeometry(pipeWidth, topHeight, pipeWidth);
     const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
     topPipe.position.set(0, gapPosition + PIPE_GAP / 2 + topHeight / 2, zPosition);
     sceneRef.current.add(topPipe);
     
     // Caps
-    const capGeometry = new THREE.BoxGeometry(PIPE_WIDTH + 1, 0.5, PIPE_WIDTH + 1);
+    const capGeometry = new THREE.BoxGeometry(pipeWidth + 1, 0.5, pipeWidth + 1);
     const capMaterial = new THREE.MeshPhongMaterial({ color: 0x006400 });
     
     const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
@@ -310,7 +316,8 @@ export default function MultiplayerRace3D() {
       topCap,
       z: zPosition,
       passed: false,
-      gapY: gapPosition
+      gapY: gapPosition,
+      width: pipeWidth
     });
   };
 
@@ -420,15 +427,22 @@ export default function MultiplayerRace3D() {
     birdRef.current.position.y = birdYRef.current;
     birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
     
+    // Position bird horizontally based on player index
+    const playerIndex = players.findIndex(p => p.id === myPlayerId);
+    const numPlayers = players.length;
+    const spacing = 3;
+    const totalWidth = (numPlayers - 1) * spacing;
+    const xOffset = playerIndex * spacing - totalWidth / 2;
+    birdRef.current.position.x = xOffset;
+    
     // Camera follow
     cameraRef.current.position.y += (birdYRef.current - cameraRef.current.position.y) * 0.08;
     
     // Update opponent birds
-    const playerIndex = players.findIndex(p => p.id === myPlayerId);
     opponentBirdsRef.current.forEach((opponent, playerId) => {
       const opponentIndex = players.findIndex(p => p.id === playerId);
-      const xOffset = (opponentIndex - playerIndex) * 3;
-      opponent.mesh.position.set(xOffset, opponent.y, 0);
+      const opponentXOffset = opponentIndex * spacing - totalWidth / 2;
+      opponent.mesh.position.set(opponentXOffset, opponent.y, 0);
     });
     
     // Broadcast position
@@ -479,7 +493,7 @@ export default function MultiplayerRace3D() {
       // Collision check
       if (pipe.z > -2.5 && pipe.z < 2.5) {
         if (birdYRef.current < pipe.gapY - PIPE_GAP / 2 || birdYRef.current > pipe.gapY + PIPE_GAP / 2) {
-          if (Math.abs(birdRef.current.position.x) < 2.5) {
+          if (Math.abs(birdRef.current.position.x) < pipe.width / 2) {
             gameOverRef.current = true;
           }
         }

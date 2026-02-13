@@ -42,14 +42,15 @@ app.prepare().then(() => {
 
     socket.on('create-room', ({ playerName, timeLimit }) => {
       const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-      rooms.set(roomCode, {
+      const room = {
         players: [{ id: socket.id, name: playerName, score: 0, position: 0, multiplier: 1, currency: 0 }],
         creator: socket.id,
         gameStarted: false,
         timeLimit: timeLimit || 120,
-      });
+      };
+      rooms.set(roomCode, room);
       socket.join(roomCode);
-      socket.emit('room-created', { roomCode, playerId: socket.id });
+      socket.emit('room-created', { roomCode, playerId: socket.id, players: room.players });
       console.log(`Room created: ${roomCode} by ${playerName} with time limit ${timeLimit}s`);
       console.log('All rooms:', Array.from(rooms.keys()));
     });
