@@ -111,7 +111,6 @@ app.prepare().then(() => {
       const player = room.players.find(p => p.id === socket.id);
       if (player) {
         player.score = score;
-        player.position = (score / WIN_SCORE) * 100; // Position on track (0-100%)
         console.log(`Updated player ${player.name} score to ${score}, broadcasting to room`);
         io.to(roomCode).emit('score-update', { players: room.players });
       } else {
@@ -129,6 +128,25 @@ app.prepare().then(() => {
         player.multiplier = multiplier;
         console.log(`Updated player ${player.name} multiplier to ${multiplier}`);
         io.to(roomCode).emit('score-update', { players: room.players });
+      }
+    });
+
+    // WebRTC signaling
+    socket.on('webrtc-offer', ({ offer, roomCode }) => {
+      console.log(`WebRTC offer from ${socket.id} in room ${roomCode}`);
+      socket.to(roomCode).emit('webrtc-offer', { offer, from: socket.id });
+    });
+
+    socket.on('webrtc-answer', ({ answer, to }) => {
+      console.log(`WebRTC answer from ${socket.id} to ${to}`);
+      io.to(to).emit('webrtc-answer', { answer });
+    });
+
+    socket.on('webrtc-ice', ({ candidate, to, roomCode }) => {
+      if (to) {
+        io.to(to).emit('webrtc-ice', { candidate });
+      } else if (roomCode) {
+        socket.to(roomCode).emit('webrtc-ice', { candidate });
       }
     });
 

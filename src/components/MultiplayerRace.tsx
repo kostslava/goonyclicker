@@ -61,9 +61,13 @@ export default function MultiplayerRace() {
   const [timeLimit, setTimeLimit] = useState(DEFAULT_TIME_LIMIT);
   const [timeRemaining, setTimeRemaining] = useState(DEFAULT_TIME_LIMIT);
   const [gameStartTime, setGameStartTime] = useState<number | null>(null);
+  const [streak, setStreak] = useState(0);
+  const [comboMultiplier, setComboMultiplier] = useState(1);
+  const [opponentStream, setOpponentStream] = useState<MediaStream | null>(null);
   
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const opponentVideoRef = useRef<HTMLVideoElement>(null);
   const handLandmarkerRef = useRef<any>(null);
   const lastHandYRef = useRef<number | null>(null);
   const stateRef = useRef<'idle' | 'moving_up' | 'moving_down'>('idle');
@@ -73,6 +77,8 @@ export default function MultiplayerRace() {
   const roomCodeRef = useRef<string>('');
   const lastStrokeTimeRef = useRef<number>(0);
   const particlesRef = useRef<Particle[]>([]);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const streakTimerRef = useRef<NodeJS.Timeout | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize Socket.io (only once)
@@ -134,7 +140,15 @@ export default function MultiplayerRace() {
       
       // Don't auto-init on mobile, let user click button
       if (!cameraReady) {
-        setTimeout(() => initHandTracking(), 500);
+        setTimeout(() => {
+          initHandTracking().then(() => {
+            // Start WebRTC video chat after camera is ready
+            setTimeout(() => startVideoChat(newSocket), 1000);
+          });
+        }, 500);
+      } else {
+        // Camera already ready, just start video chat
+        setTimeout(() => startVideoChat(newSocket), 1000);
       }
     });
 
@@ -148,7 +162,55 @@ export default function MultiplayerRace() {
       setWinner(winner);
       setGameState('winner');
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (peerConnectionRef.current) peerConnectionRef.current.close();
       playWinSound();
+    });
+
+    // WebRTC signaling for video chat
+    newSocket.on('webrtc-offer', async ({ offer, from }) => {
+      console.log('Received WebRTC offer from:', from);
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      peerConnectionRef.current = pc;
+
+      pc.ontrack = (event) => {
+        console.log('Received remote stream');
+        setOpponentStream(event.streams[0]);
+        if (opponentVideoRef.current) {
+          opponentVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          newSocket.emit('webrtc-ice', { candidate: event.candidate, to: from });
+        }
+      };
+
+      if (videoRef.current && videoRef.current.srcObject) {
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => {
+          pc.addTrack(track, videoRef.current!.srcObject as MediaStream);
+        });
+      }
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      newSocket.emit('webrtc-answer', { answer, to: from });
+    });
+
+    newSocket.on('webrtc-answer', async ({ answer }) => {
+      console.log('Received WebRTC answer');
+      if (peerConnectionRef.current) {
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+      }
+    });
+
+    newSocket.on('webrtc-ice', async ({ candidate }) => {
+      if (peerConnectionRef.current) {
+        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      }
     });
 
     newSocket.on('error', (msg) => {
@@ -158,9 +220,29 @@ export default function MultiplayerRace() {
 
     return () => {
       console.log('Closing socket connection');
+      if (peerConnectionRef.current) peerConnectionRef.current.close();
       newSocket.close();
     };
   }, []); // Remove gameState from dependencies!
+
+  // Play rep sound
+  const playRepSound = (pitch = 1) => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioContextRef.current;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(300 * pitch, now);
+    osc.frequency.exponentialRampToValueAtTime(600 * pitch, now + 0.1);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  };
 
   // Play win sound
   const playWinSound = () => {
@@ -179,6 +261,56 @@ export default function MultiplayerRace() {
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
     osc.start(now);
     osc.stop(now + 0.3);
+  };
+
+  // Start video chat via WebRTC
+  const startVideoChat = async (socket: Socket) => {
+    try {
+      if (!videoRef.current || !videoRef.current.srcObject) {
+        console.log('Video not ready yet for WebRTC');
+        return;
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      peerConnectionRef.current = pc;
+
+      // Add local video tracks
+      (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => {
+        pc.addTrack(track, videoRef.current!.srcObject as MediaStream);
+      });
+
+      // Handle incoming tracks
+      pc.ontrack = (event) => {
+        console.log('Received opponent video stream');
+        setOpponentStream(event.streams[0]);
+        if (opponentVideoRef.current) {
+          opponentVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('webrtc-ice', { 
+            candidate: event.candidate, 
+            roomCode: roomCodeRef.current 
+          });
+        }
+      };
+
+      // Create and send offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('webrtc-offer', { 
+        offer, 
+        roomCode: roomCodeRef.current 
+      });
+      console.log('Sent WebRTC offer');
+    } catch (err) {
+      console.error('Failed to start video chat:', err);
+    }
   };
 
   // Spawn particles (white liquid)
@@ -435,11 +567,37 @@ export default function MultiplayerRace() {
                 const now = performance.now();
                 const timeSinceLastStroke = (now - lastStrokeTimeRef.current) / 1000;
                 const speed = timeSinceLastStroke > 0 ? Math.min(3, 1 / timeSinceLastStroke) : 1;
+                
+                // Streak system - fast strokes build combo
+                let newStreak = streak;
+                let newCombo = comboMultiplier;
+                if (timeSinceLastStroke < 0.8) {
+                  newStreak++;
+                  newCombo = Math.min(5, 1 + Math.floor(newStreak / 3) * 0.5);
+                  setStreak(newStreak);
+                  setComboMultiplier(newCombo);
+                  
+                  // Reset streak timer
+                  if (streakTimerRef.current) clearTimeout(streakTimerRef.current);
+                  streakTimerRef.current = setTimeout(() => {
+                    setStreak(0);
+                    setComboMultiplier(1);
+                  }, 2000);
+                } else {
+                  newStreak = 0;
+                  newCombo = 1;
+                  setStreak(0);
+                  setComboMultiplier(1);
+                }
+                
                 lastStrokeTimeRef.current = now;
+
+                // Play sound (pitch increases with combo)
+                playRepSound(newCombo);
 
                 setLocalScore((prevScore) => {
                   const newScore = prevScore + 1;
-                  console.log('REP COUNTED! New score:', newScore);
+                  console.log('REP COUNTED! New score:', newScore, 'Combo:', newCombo);
                   
                   if (socketRef.current && roomCodeRef.current) {
                     console.log('Emitting score update:', { roomCode: roomCodeRef.current, score: newScore });
@@ -451,20 +609,21 @@ export default function MultiplayerRace() {
                   return newScore;
                 });
 
-                setCurrency((prev) => prev + multiplier);
+                setCurrency((prev) => prev + multiplier * newCombo);
 
-                // Spawn particles based on multiplier and speed
-                const particleCount = Math.floor(multiplier * 3 + speed * 5);
+                // Spawn particles based on multiplier, speed, and combo
+                const particleCount = Math.floor(multiplier * 3 + speed * 5 + newCombo * 5);
                 const handX = canvas.width - wrist.x * canvas.width;
                 const handYPos = wrist.y * canvas.height;
                 spawnParticles(handX, handYPos, particleCount, speed);
                 
                 stateRef.current = 'moving_down';
                 
-                // Visual feedback
-                ctx.fillStyle = '#00ff00';
+                // Visual feedback with combo
+                ctx.fillStyle = newCombo > 1 ? '#ffff00' : '#00ff00';
                 ctx.font = 'bold 40px Arial';
-                ctx.fillText(`+${multiplier}!`, canvas.width / 2 - 40, canvas.height / 2);
+                const text = newCombo > 1 ? `x${newCombo}!` : `+${multiplier}!`;
+                ctx.fillText(text, canvas.width / 2 - 40, canvas.height / 2);
               } else if (stateRef.current === 'idle') {
                 stateRef.current = 'moving_down';
                 console.log('State: moving_down (from idle)');
@@ -677,15 +836,36 @@ export default function MultiplayerRace() {
           <p className="text-4xl font-bold text-cyan-400">💦 {currency}</p>
           <p className="text-xl text-pink-400">x{multiplier} per stroke</p>
           <p className="text-2xl text-white">Score: {localScore}</p>
+          {comboMultiplier > 1 && (
+            <p className="text-3xl font-bold text-yellow-400 animate-pulse">
+              🔥 x{comboMultiplier} COMBO!
+            </p>
+          )}
         </div>
       </div>
       
-      {/* Opponent Stats - Top Right */}
+      {/* Opponent Video Feed - Top Right */}
       <div className="absolute top-4 right-4 z-40">
-        <div className="bg-black bg-opacity-70 p-4 rounded-lg border-2 border-pink-500 neon-border">
-          <p className="text-2xl font-bold text-white">{players.find(p => p.id !== myPlayerId)?.name || 'OPPONENT'}</p>
-          <p className="text-2xl text-white">Score: {players.find(p => p.id !== myPlayerId)?.score || 0}</p>
-          <p className="text-xl text-pink-400">x{players.find(p => p.id !== myPlayerId)?.multiplier || 1} per stroke</p>
+        <div className="bg-black bg-opacity-70 p-2 rounded-lg border-2 border-pink-500 neon-border">
+          <p className="text-xl font-bold text-white mb-1 text-center">
+            {players.find(p => p.id !== myPlayerId)?.name || 'OPPONENT'}
+          </p>
+          <div className="relative w-48 h-36 bg-gray-900 rounded-lg overflow-hidden">
+            <video
+              ref={opponentVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover transform -scale-x-100"
+            />
+            {!opponentStream && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+                <p className="text-sm">Connecting...</p>
+              </div>
+            )}
+          </div>
+          <p className="text-xl text-white mt-1">Score: {players.find(p => p.id !== myPlayerId)?.score || 0}</p>
+          <p className="text-sm text-pink-400">x{players.find(p => p.id !== myPlayerId)?.multiplier || 1} per stroke</p>
         </div>
       </div>
       
