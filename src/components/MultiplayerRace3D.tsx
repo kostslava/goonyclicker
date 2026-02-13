@@ -264,7 +264,6 @@ export default function MultiplayerRace3D() {
       setIsDead(false);
       frameCountRef.current = 0;
       lastObstacleZRef.current = -25;
-      repStateRef.current = 'waiting';
       
       // Reset bird opacity
       if (birdRef.current) {
@@ -418,7 +417,7 @@ export default function MultiplayerRace3D() {
   const createObstacle = (zPosition: number) => {
     if (!sceneRef.current) return;
     
-    const gapPosition = GROUND_LEVEL + 2 + Math.random() * 5;
+    const gapPosition = GROUND_LEVEL + 2 + Math.random() * 10;
     
     // Calculate pipe width based on number of players
     const numPlayers = players.length || 1;
@@ -532,7 +531,6 @@ export default function MultiplayerRace3D() {
     isGameRunningRef.current = false;
     setMyScore(0);
     setIsDead(false);
-    repStateRef.current = 'waiting';
     
     // Reset bird visual state
     if (birdRef.current) {
@@ -591,16 +589,19 @@ export default function MultiplayerRace3D() {
           if (lastHandYRef.current !== null) {
             const deltaY = handY - lastHandYRef.current;
             
-            if (repStateRef.current === 'waiting' && deltaY < -MOVEMENT_THRESHOLD) {
-              // Started moving up
-              repStateRef.current = 'up';
-              console.log('UP detected');
-            } else if (repStateRef.current === 'up' && deltaY > MOVEMENT_THRESHOLD) {
-              // Completed rep: moved up then down
-              repStateRef.current = 'waiting';
+            // Allow jump on upward motion only for better responsiveness
+            if (deltaY < -MOVEMENT_THRESHOLD) {
+              // Moving up - trigger jump
               birdVelocityRef.current = FLAP_STRENGTH;
               console.log('FLAP!');
+              // Update last position to prevent multiple jumps from same motion
+              lastHandYRef.current = handY;
+            } else if (Math.abs(deltaY) < MOVEMENT_THRESHOLD / 2) {
+              // Small movement - update tracking for next jump detection
+              lastHandYRef.current = handY;
             }
+          } else {
+            lastHandYRef.current = handY;
           }
           
           lastHandYRef.current = handY;
@@ -736,13 +737,22 @@ export default function MultiplayerRace3D() {
       
       // Collision check (only for alive players)
       if (!gameOverRef.current && pipe.z > -2.5 && pipe.z < 2.5) {
-        if (birdYRef.current < pipe.gapY - PIPE_GAP / 2 || birdYRef.current > pipe.gapY + PIPE_GAP / 2) {
-          if (Math.abs(birdRef.current.position.x) < pipe.width / 2) {
-            gameOverRef.current = true;
-            setIsDead(true);
-            if (socketRef.current && roomCodeRef.current) {
-              socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
-            }
+        const BIRD_RADIUS = 0.8;
+        const birdX = birdRef.current.position.x;
+        const birdY = birdYRef.current;
+        
+        // Check if bird is within pipe's X bounds (accounting for bird radius)
+        const isInPipeXRange = Math.abs(birdX) < pipe.width / 2 + BIRD_RADIUS;
+        
+        // Check if bird is outside the gap vertically (accounting for bird radius)
+        const isOutsideGap = birdY < pipe.gapY - PIPE_GAP / 2 + BIRD_RADIUS || 
+                             birdY > pipe.gapY + PIPE_GAP / 2 - BIRD_RADIUS;
+        
+        if (isInPipeXRange && isOutsideGap) {
+          gameOverRef.current = true;
+          setIsDead(true);
+          if (socketRef.current && roomCodeRef.current) {
+            socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
           }
         }
       }
