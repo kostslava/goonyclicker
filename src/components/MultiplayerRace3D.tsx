@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
-const MOVEMENT_THRESHOLD = 0.015;
+const MOVEMENT_THRESHOLD = 0.02;
 const DEFAULT_TIME_LIMIT = 120;
 const GRAVITY = -0.8;
 const FLAP_STRENGTH = 12;
@@ -615,9 +615,7 @@ export default function MultiplayerRace3D() {
       }
       
       // Always draw webcam (even during countdown) so user can see their camera feed
-      if (frameCountRef.current % 3 === 0) {
-        drawWebcam();
-      }
+      drawWebcam();
       
       // Always render the scene (to show countdown state)
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
@@ -639,9 +637,8 @@ export default function MultiplayerRace3D() {
     
     // Only process player physics and input if player is alive AND game is running
     if (!gameOverRef.current && isGameRunningRef.current) {
-      // Hand detection every other frame for better performance
+      // Hand detection - run every frame for responsiveness
       if (
-        frameCountRef.current % 2 === 0 &&
         videoRef.current &&
         handLandmarkerRef.current &&
         videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
@@ -656,25 +653,14 @@ export default function MultiplayerRace3D() {
           if (lastHandYRef.current !== null) {
             const deltaY = handY - lastHandYRef.current;
             
-            // Allow jump on upward motion only for better responsiveness
+            // Hand moved up = flap
             if (deltaY < -MOVEMENT_THRESHOLD) {
-              // Moving up - trigger jump
               birdVelocityRef.current = FLAP_STRENGTH;
               console.log('FLAP!');
-              // Update last position to prevent multiple jumps from same motion
-              lastHandYRef.current = handY;
-            } else if (Math.abs(deltaY) < MOVEMENT_THRESHOLD / 2) {
-              // Small movement - update tracking for next jump detection
-              lastHandYRef.current = handY;
             }
-          } else {
-            lastHandYRef.current = handY;
           }
           
           lastHandYRef.current = handY;
-        } else {
-          // No hand detected, reset lastHandY to prevent false detections
-          lastHandYRef.current = null;
         }
       }
       
@@ -882,13 +868,14 @@ export default function MultiplayerRace3D() {
     const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for performance
     if (!ctx) return;
     
+    // Draw mirrored video
     ctx.save();
     ctx.scale(-1, 1);
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
     
-    // Only draw hand landmarks every other webcam render for performance
-    if (frameCountRef.current % 6 === 0 && handLandmarkerRef.current && video.readyState === video.HAVE_ENOUGH_DATA) {
+    // Draw hand landmarks
+    if (handLandmarkerRef.current && video.readyState === video.HAVE_ENOUGH_DATA) {
       const results = handLandmarkerRef.current.detectForVideo(video, performance.now());
       
       if (results?.landmarks && results.landmarks.length > 0) {
