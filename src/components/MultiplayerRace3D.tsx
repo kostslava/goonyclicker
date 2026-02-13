@@ -66,6 +66,7 @@ export default function MultiplayerRace3D() {
   const roomCodeRef = useRef<string>('');
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const repStateRef = useRef<'waiting' | 'up' | 'down'>('waiting');
+  const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -123,13 +124,29 @@ export default function MultiplayerRace3D() {
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setIsDead(false);
+      setError('Initializing camera...');
       
       // Initialize camera and wait for ready signal
       setTimeout(initHandTrackingCallback, 100);
+      
+      // Fallback: auto-start after 10 seconds even if not all players ready
+      readyTimeoutRef.current = setTimeout(() => {
+        console.log('Timeout reached, forcing game start');
+        newSocket.emit('force-start-countdown', { roomCode: roomCodeRef.current });
+      }, 10000);
     });
 
     newSocket.on('all-players-ready', () => {
       console.log('All players ready, starting countdown');
+      
+      // Clear the timeout since we're starting
+      if (readyTimeoutRef.current) {
+        clearTimeout(readyTimeoutRef.current);
+        readyTimeoutRef.current = null;
+      }
+      
+      setError(''); // Clear any error messages
+      
       // Start countdown
       setCountdown(3);
       const countdownInterval = setInterval(() => {
@@ -237,6 +254,7 @@ export default function MultiplayerRace3D() {
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setWinner(null);
+      setError('Preparing for restart...');
       
       // Reset game state
       birdYRef.current = 0;
@@ -277,7 +295,14 @@ export default function MultiplayerRace3D() {
       // Signal player is ready for restart
       if (socketRef.current && roomCodeRef.current) {
         socketRef.current.emit('player-ready', { roomCode: roomCodeRef.current });
+        setError(''); // Clear status after signaling ready
       }
+      
+      // Fallback: auto-start after 10 seconds even if not all players ready
+      readyTimeoutRef.current = setTimeout(() => {
+        console.log('Restart timeout reached, forcing game start');
+        newSocket.emit('force-start-countdown', { roomCode: roomCodeRef.current });
+      }, 10000);
     });
 
     newSocket.on('error', (msg) => {
@@ -288,6 +313,7 @@ export default function MultiplayerRace3D() {
     return () => {
       isGameRunningRef.current = false;
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (readyTimeoutRef.current) clearTimeout(readyTimeoutRef.current);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       newSocket.close();
     };
@@ -471,6 +497,7 @@ export default function MultiplayerRace3D() {
       
       handLandmarkerRef.current = landmarker;
       setIsTracking(true);
+      setError(''); // Clear error on success
       
       // Signal that this player's camera is ready
       if (socketRef.current && roomCodeRef.current) {
@@ -480,7 +507,17 @@ export default function MultiplayerRace3D() {
       startGame();
     } catch (err) {
       const error = err as { name?: string; message?: string };
-      setError(error.name === 'NotAllowedError' ? 'Camera permission denied' : 'Camera error: ' + (error.message || 'Unknown error'));
+      const errorMsg = error.name === 'NotAllowedError' ? 'Camera permission denied' : 'Camera error: ' + (error.message || 'Unknown error');
+      setError(errorMsg);
+      console.error('Camera initialization failed:', errorMsg);
+      
+      // Still signal ready even if camera fails, so game can start for other players
+      if (socketRef.current && roomCodeRef.current) {
+        socketRef.current.emit('player-ready', { roomCode: roomCodeRef.current });
+      }
+      
+      // Start game loop anyway (player just won't have hand tracking)
+      startGame();
     }
   };
 

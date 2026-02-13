@@ -188,6 +188,15 @@ app.prepare().then(() => {
       }
     });
 
+    socket.on('force-start-countdown', ({ roomCode }) => {
+      console.log(`Force start countdown in room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      console.log(`Force starting game in room ${roomCode} (${room.playersReady?.size || 0}/${room.players.length} ready)`);
+      io.to(roomCode).emit('all-players-ready');
+    });
+
     socket.on('update-multiplier', ({ roomCode, multiplier }) => {
       console.log(`Multiplier update from ${socket.id} in room ${roomCode}: ${multiplier}`);
       const room = rooms.get(roomCode);
