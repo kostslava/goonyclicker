@@ -29,8 +29,9 @@ app.prepare().then(() => {
   });
   
   const io = new Server(httpServer, {
+    transports: ['polling', 'websocket'], // Use polling for Vercel compatibility
     cors: {
-      origin: '*', // Allow all origins for LAN play
+      origin: '*',
       methods: ['GET', 'POST']
     }
   });
