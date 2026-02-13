@@ -612,10 +612,11 @@ export default function MultiplayerRace3D() {
       // Only update game physics when game is actually running (after countdown)
       if (isGameRunningRef.current) {
         updateGame(deltaTime);
-        // Draw webcam less frequently for performance (every 3rd frame)
-        if (frameCountRef.current % 3 === 0) {
-          drawWebcam();
-        }
+      }
+      
+      // Always draw webcam (even during countdown) so user can see their camera feed
+      if (frameCountRef.current % 3 === 0) {
+        drawWebcam();
       }
       
       // Always render the scene (to show countdown state)
