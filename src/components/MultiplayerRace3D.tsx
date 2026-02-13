@@ -260,6 +260,7 @@ export default function MultiplayerRace3D() {
       birdYRef.current = 0;
       birdVelocityRef.current = 0;
       gameOverRef.current = false;
+      isGameRunningRef.current = false;
       setIsDead(false);
       frameCountRef.current = 0;
       lastObstacleZRef.current = -25;
@@ -528,7 +529,7 @@ export default function MultiplayerRace3D() {
     gameOverRef.current = false;
     frameCountRef.current = 0;
     lastObstacleZRef.current = -25;
-    isGameRunningRef.current = true;
+    isGameRunningRef.current = false;
     setMyScore(0);
     setIsDead(false);
     repStateRef.current = 'waiting';
@@ -552,10 +553,13 @@ export default function MultiplayerRace3D() {
     }
     
     const gameLoop = () => {
-      if (!isGameRunningRef.current) return;
+      // Only update game physics when game is actually running (after countdown)
+      if (isGameRunningRef.current) {
+        updateGame();
+        drawWebcam();
+      }
       
-      updateGame();
-      drawWebcam();
+      // Always render the scene (to show countdown state)
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
