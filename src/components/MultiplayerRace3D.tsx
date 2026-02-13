@@ -557,9 +557,19 @@ export default function MultiplayerRace3D() {
               
               // Set canvas size to match actual video dimensions
               if (webcamCanvasRef.current && videoRef.current) {
-                webcamCanvasRef.current.width = videoRef.current.videoWidth;
-                webcamCanvasRef.current.height = videoRef.current.videoHeight;
-                console.log('Video dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
+                const vw = videoRef.current.videoWidth;
+                const vh = videoRef.current.videoHeight;
+                webcamCanvasRef.current.width = vw;
+                webcamCanvasRef.current.height = vh;
+                
+                // Log actual track settings
+                const tracks = (videoRef.current.srcObject as MediaStream).getVideoTracks();
+                if (tracks[0]) {
+                  const settings = tracks[0].getSettings();
+                  console.log('✅ Video element:', vw, 'x', vh);
+                  console.log('✅ Stream track:', settings.width, 'x', settings.height);
+                  console.log('✅ Canvas buffer:', webcamCanvasRef.current.width, 'x', webcamCanvasRef.current.height);
+                }
               }
               
               resolve(null);
@@ -952,6 +962,14 @@ export default function MultiplayerRace3D() {
     if (results?.landmarks && results.landmarks.length > 0) {
       const hand = results.landmarks[0];
       
+      // Debug: Log first landmark and dimensions (only occasionally to avoid spam)
+      if (Math.random() < 0.01) {
+        const wrist = hand[0];
+        console.log('📍 Canvas:', canvas.width, 'x', canvas.height, '| Video:', vw, 'x', vh);
+        console.log('📍 Raw landmark[0]:', wrist.x.toFixed(3), ',', wrist.y.toFixed(3));
+        console.log('📍 Scaled to:', Math.round(canvas.width - wrist.x * canvas.width), ',', Math.round(wrist.y * canvas.height));
+      }
+      
       ctx.fillStyle = '#00f5ff';
       ctx.strokeStyle = '#00f5ff';
       ctx.lineWidth = 1;
@@ -1137,7 +1155,7 @@ export default function MultiplayerRace3D() {
 
   return (
     <div className="relative min-h-screen w-full bg-black flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }} />
+      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '320px', height: '240px' }} />
       
       {/* Game Canvas */}
       <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
