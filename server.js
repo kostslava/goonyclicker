@@ -206,7 +206,8 @@ app.prepare().then(() => {
       // Check if all players are ready
       if (room.playersReady.size === room.players.length) {
         console.log(`All players ready in room ${roomCode}, starting countdown`);
-        io.to(roomCode).emit('all-players-ready');
+        const startTime = Date.now(); // Shared timestamp for all clients
+        io.to(roomCode).emit('all-players-ready', { startTime });
       }
     });
 
@@ -216,7 +217,8 @@ app.prepare().then(() => {
       if (!room) return;
       
       console.log(`Force starting game in room ${roomCode} (${room.playersReady?.size || 0}/${room.players.length} ready)`);
-      io.to(roomCode).emit('all-players-ready');
+      const startTime = Date.now(); // Shared timestamp for all clients
+      io.to(roomCode).emit('all-players-ready', { startTime });
     });
 
     socket.on('update-multiplier', ({ roomCode, multiplier }) => {

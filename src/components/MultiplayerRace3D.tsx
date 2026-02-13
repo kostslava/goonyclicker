@@ -72,6 +72,7 @@ export default function MultiplayerRace3D() {
   const isRoomCreatorRef = useRef<boolean>(false);
   const revealedPipeIndexRef = useRef<number>(0);
   const gameStartTimeRef = useRef<number>(0);
+  const sharedStartTimeRef = useRef<number>(0);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -142,8 +143,8 @@ export default function MultiplayerRace3D() {
       }, 10000);
     });
 
-    newSocket.on('all-players-ready', () => {
-      console.log('All players ready, starting countdown');
+    newSocket.on('all-players-ready', ({ startTime }: { startTime: number }) => {
+      console.log('All players ready, starting countdown, shared start time:', startTime);
       
       // Clear the timeout since we're starting
       if (readyTimeoutRef.current) {
@@ -152,6 +153,9 @@ export default function MultiplayerRace3D() {
       }
       
       setError(''); // Clear any error messages
+      
+      // Store shared start time from server
+      sharedStartTimeRef.current = startTime;
       
       // Start countdown
       setCountdown(3);
@@ -165,20 +169,22 @@ export default function MultiplayerRace3D() {
             isGameRunningRef.current = true;
             gameStartTimeRef.current = performance.now();
             
-            // Start timer
+            // Start timer that calculates from shared server time
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             timerIntervalRef.current = setInterval(() => {
-              setTimeRemaining(prev => {
-                if (prev <= 1) {
-                  if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-                  setTimeout(() => {
-                    socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
-                  }, 100);
-                  return 0;
-                }
-                return prev - 1;
-              });
-            }, 1000);
+              const elapsedMs = Date.now() - sharedStartTimeRef.current;
+              const elapsedSeconds = Math.floor(elapsedMs / 1000);
+              const remaining = Math.max(0, timeLimit - elapsedSeconds);
+              
+              setTimeRemaining(remaining);
+              
+              if (remaining <= 0) {
+                if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+                setTimeout(() => {
+                  socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
+                }, 100);
+              }
+            }, 100); // Update every 100ms for better accuracy
             
             return null;
           }
@@ -200,16 +206,15 @@ export default function MultiplayerRace3D() {
         const bird = createBird(0x00ffff); // Different color for opponents
         sceneRef.current.add(bird);
         
-        // Set initial horizontal and depth position immediately
+        // Set initial horizontal position immediately - all birds at same Z depth
         const currentPlayers = players.length > 0 ? players : [];
         const opponentIndex = currentPlayers.findIndex(p => p.id === playerId);
         if (opponentIndex !== -1) {
           const spacing = 6;
           const totalWidth = (currentPlayers.length - 1) * spacing;
           const xOffset = opponentIndex * spacing - totalWidth / 2;
-          const zOffset = opponentIndex * -3; // 3 units apart in Z
           bird.position.x = xOffset;
-          bird.position.z = zOffset;
+          bird.position.z = 0; // All birds at same depth
         }
         
         opponent = { mesh: bird, y, targetY: y, isAlive };
@@ -352,38 +357,36 @@ export default function MultiplayerRace3D() {
     scene.background = new THREE.Color(0x87CEEB);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 100); // Reduced far plane from 1000 to 100
     camera.position.set(0, 2, 10);
     camera.lookAt(0, 0, -10);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false }); // Disabled antialiasing for performance
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: false,
+      powerPreference: 'low-power', // Prefer integrated GPU for better battery/performance
+      precision: 'lowp' // Low precision for better performance
+    });
     renderer.setSize(800, 600);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Limit pixel ratio
+    renderer.setPixelRatio(1); // Fixed at 1 for performance
     const container = containerRef.current;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    // Lighting - simplified for performance
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2); // Single light source
     scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    directionalLight.position.set(5, 10, 5);
-    scene.add(directionalLight);
 
     // Create player bird
     const bird = createBird(0xFFD700);
-    // Space out birds in Z direction
-    const playerIndex = players.findIndex(p => p.id === myPlayerId);
-    const birdZOffset = playerIndex * -3; // 3 units apart in Z
-    bird.position.set(0, 0, birdZOffset);
+    // Position bird on X axis (width) - will be updated in game loop
+    bird.position.set(0, 0, 0);
     scene.add(bird);
     birdRef.current = bird;
 
-    // Create ground and ceiling indicators
+    // Create ground - using MeshBasicMaterial for performance
     const groundGeometry = new THREE.PlaneGeometry(60, 250);
-    const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x7CFC00, side: THREE.DoubleSide });
+    const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x7CFC00, side: THREE.DoubleSide });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = GROUND_LEVEL;
@@ -400,15 +403,15 @@ export default function MultiplayerRace3D() {
   const createBird = (color: number): THREE.Group => {
     const bird = new THREE.Group();
     
-    // Body - further reduced segments for performance
-    const bodyGeometry = new THREE.SphereGeometry(0.8, 12, 8);
-    const bodyMaterial = new THREE.MeshPhongMaterial({ color });
+    // Body - minimal segments for performance
+    const bodyGeometry = new THREE.SphereGeometry(0.8, 6, 4); // Reduced from 12,8 to 6,4
+    const bodyMaterial = new THREE.MeshBasicMaterial({ color }); // MeshBasicMaterial is much faster
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     bird.add(body);
     
-    // Wings
+    // Wings - simplified
     const wingGeometry = new THREE.BoxGeometry(0.3, 0.1, 1);
-    const wingMaterial = new THREE.MeshPhongMaterial({ color: color === 0xFFD700 ? 0xFFA500 : 0x00CED1 });
+    const wingMaterial = new THREE.MeshBasicMaterial({ color: color === 0xFFD700 ? 0xFFA500 : 0x00CED1 });
     
     const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
     leftWing.position.set(-0.7, 0, 0);
@@ -418,17 +421,17 @@ export default function MultiplayerRace3D() {
     rightWing.position.set(0.7, 0, 0);
     bird.add(rightWing);
     
-    // Beak - reduced segments
-    const beakGeometry = new THREE.ConeGeometry(0.2, 0.5, 4);
-    const beakMaterial = new THREE.MeshPhongMaterial({ color: 0xFF6347 });
+    // Beak - minimal geometry
+    const beakGeometry = new THREE.ConeGeometry(0.2, 0.5, 3); // Reduced to 3 segments
+    const beakMaterial = new THREE.MeshBasicMaterial({ color: 0xFF6347 });
     const beak = new THREE.Mesh(beakGeometry, beakMaterial);
     beak.position.set(0, 0, 0.8);
     beak.rotation.x = Math.PI / 2;
     bird.add(beak);
     
-    // Eyes - reduced segments
-    const eyeGeometry = new THREE.SphereGeometry(0.15, 6, 4);
-    const eyeMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+    // Eyes - minimal geometry
+    const eyeGeometry = new THREE.SphereGeometry(0.15, 4, 3); // Reduced segments
+    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
     
     const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
     leftEye.position.set(0.3, 0.3, 0.6);
@@ -441,23 +444,25 @@ export default function MultiplayerRace3D() {
     return bird;
   };
 
-  const createObstacle = (zPosition: number, isVisible: boolean = false, seed?: number) => {
+  const createObstacle = (zPosition: number, isVisible: boolean = false, seed?: number, playerXOffset: number = 0) => {
     if (!sceneRef.current) return;
     
     // Use seed for consistent random generation across all clients
     const randomValue = seed !== undefined ? seed : Math.random();
     const gapPosition = GROUND_LEVEL + 2 + randomValue * 10;
     
-    // Calculate pipe width based on number of players
+    // Calculate pipe width based on number of players - needs to encompass all birds
     const numPlayers = players.length || 1;
-    const pipeWidth = Math.max(PIPE_WIDTH, numPlayers * 3 + 3);
+    const birdSpacing = 6;
+    const totalBirdWidth = (numPlayers - 1) * birdSpacing;
+    const pipeWidth = Math.max(PIPE_WIDTH, totalBirdWidth + 8); // +8 for margin on both sides
     
-    // Bottom pipe
+    // Bottom pipe - using MeshBasicMaterial for performance
     const bottomHeight = gapPosition - GROUND_LEVEL - PIPE_GAP / 2;
     const bottomGeometry = new THREE.BoxGeometry(pipeWidth, bottomHeight, pipeWidth);
-    const pipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+    const pipeMaterial = new THREE.MeshBasicMaterial({ color: 0x228B22 }); // Changed to MeshBasicMaterial
     const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
-    bottomPipe.position.set(0, GROUND_LEVEL + bottomHeight / 2, zPosition);
+    bottomPipe.position.set(playerXOffset, GROUND_LEVEL + bottomHeight / 2, zPosition); // Centered on player
     bottomPipe.visible = isVisible;
     sceneRef.current.add(bottomPipe);
     
@@ -465,21 +470,21 @@ export default function MultiplayerRace3D() {
     const topHeight = CEILING_LEVEL - gapPosition - PIPE_GAP / 2;
     const topGeometry = new THREE.BoxGeometry(pipeWidth, topHeight, pipeWidth);
     const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
-    topPipe.position.set(0, gapPosition + PIPE_GAP / 2 + topHeight / 2, zPosition);
+    topPipe.position.set(playerXOffset, gapPosition + PIPE_GAP / 2 + topHeight / 2, zPosition); // Centered on player
     topPipe.visible = isVisible;
     sceneRef.current.add(topPipe);
     
-    // Caps
+    // Caps - using MeshBasicMaterial for performance
     const capGeometry = new THREE.BoxGeometry(pipeWidth + 1, 0.5, pipeWidth + 1);
-    const capMaterial = new THREE.MeshPhongMaterial({ color: 0x006400 });
+    const capMaterial = new THREE.MeshBasicMaterial({ color: 0x006400 }); // Changed to MeshBasicMaterial
     
     const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
-    bottomCap.position.set(0, gapPosition - PIPE_GAP / 2, zPosition);
+    bottomCap.position.set(playerXOffset, gapPosition - PIPE_GAP / 2, zPosition); // Centered on player
     bottomCap.visible = isVisible;
     sceneRef.current.add(bottomCap);
     
     const topCap = new THREE.Mesh(capGeometry, capMaterial);
-    topCap.position.set(0, gapPosition + PIPE_GAP / 2, zPosition);
+    topCap.position.set(playerXOffset, gapPosition + PIPE_GAP / 2, zPosition); // Centered on player
     topCap.visible = isVisible;
     sceneRef.current.add(topCap);
     
@@ -498,7 +503,7 @@ export default function MultiplayerRace3D() {
   const initHandTracking = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } 
+        video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } } // Reduced from 640x480
       });
       
       if (videoRef.current) {
@@ -572,7 +577,7 @@ export default function MultiplayerRace3D() {
       birdRef.current.rotation.z = 0;
       birdRef.current.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          if (child.material instanceof THREE.MeshPhongMaterial) {
+          if (child.material instanceof THREE.MeshBasicMaterial) {
             child.material.transparent = false;
             child.material.opacity = 1.0;
           }
@@ -580,19 +585,28 @@ export default function MultiplayerRace3D() {
       });
     }
     
-    // Pre-create ALL 50 pipes, initially invisible
+    // Pre-create first 30 pipes (reduced from 50 for performance)
     // Use deterministic seeds for consistent obstacle placement across all clients
-    for (let i = 0; i < 50; i++) {
+    const playerIndex = players.findIndex(p => p.id === myPlayerId);
+    const numPlayers = players.length;
+    const spacing = 6;
+    const totalWidth = (numPlayers - 1) * spacing;
+    const playerXOffset = playerIndex * spacing - totalWidth / 2;
+    
+    for (let i = 0; i < 30; i++) {
       // Use a deterministic seed based on index for consistent random values
       const seed = (Math.sin(i * 12.9898) + 1) / 2; // Generates value between 0 and 1
-      createObstacle(-25 - i * 25, false, seed);
+      createObstacle(-25 - i * 25, false, seed, playerXOffset);
     }
     
     const gameLoop = () => {
       // Only update game physics when game is actually running (after countdown)
       if (isGameRunningRef.current) {
         updateGame();
-        drawWebcam();
+        // Draw webcam less frequently for performance (every 3rd frame)
+        if (frameCountRef.current % 3 === 0) {
+          drawWebcam();
+        }
       }
       
       // Always render the scene (to show countdown state)
@@ -600,6 +614,7 @@ export default function MultiplayerRace3D() {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
       
+      frameCountRef.current++;
       animationFrameRef.current = requestAnimationFrame(gameLoop);
     };
     
@@ -611,8 +626,9 @@ export default function MultiplayerRace3D() {
     
     // Only process player physics and input if player is alive AND game is running
     if (!gameOverRef.current && isGameRunningRef.current) {
-      // Hand detection every frame for better responsiveness
+      // Hand detection every other frame for better performance
       if (
+        frameCountRef.current % 2 === 0 &&
         videoRef.current &&
         handLandmarkerRef.current &&
         videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
@@ -664,7 +680,7 @@ export default function MultiplayerRace3D() {
       // Fade out the bird
       birdRef.current.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          if (child.material instanceof THREE.MeshPhongMaterial) {
+          if (child.material instanceof THREE.MeshBasicMaterial) {
             child.material.transparent = true;
             child.material.opacity = Math.max(0.3, child.material.opacity - 0.01);
           }
@@ -675,10 +691,11 @@ export default function MultiplayerRace3D() {
     // Position bird horizontally based on player index
     const playerIndex = players.findIndex(p => p.id === myPlayerId);
     const numPlayers = players.length;
-    const spacing = 6; // Increased spacing to prevent overlap
+    const spacing = 6; // Spacing between birds on X axis
     const totalWidth = (numPlayers - 1) * spacing;
     const xOffset = playerIndex * spacing - totalWidth / 2;
     birdRef.current.position.x = xOffset;
+    birdRef.current.position.z = 0; // Keep all birds at same depth
     
     // Ensure bird stays at Y=0 during countdown (when game not running)
     if (!isGameRunningRef.current && !gameOverRef.current) {
@@ -691,11 +708,10 @@ export default function MultiplayerRace3D() {
     opponentBirdsRef.current.forEach((opponent, playerId) => {
       const opponentIndex = players.findIndex(p => p.id === playerId);
       const opponentXOffset = opponentIndex * spacing - totalWidth / 2;
-      const opponentZOffset = opponentIndex * -3; // Same Z spacing as player bird
       
       // Smooth interpolation for Y position (lerp with factor 0.3 for responsiveness)
       opponent.y += (opponent.targetY - opponent.y) * 0.3;
-      opponent.mesh.position.set(opponentXOffset, opponent.y, opponentZOffset);
+      opponent.mesh.position.set(opponentXOffset, opponent.y, 0); // All birds at same depth
     });
     
     // Camera follow - spectate last two alive players when dead
@@ -766,7 +782,7 @@ export default function MultiplayerRace3D() {
         const elapsedTime = (performance.now() - gameStartTimeRef.current) / 1000; // seconds
         const pipesToReveal = Math.floor(elapsedTime / 0.67); // Reveal one pipe every 0.67 seconds (100 frames at ~60fps)
         
-        if (pipesToReveal > revealedPipeIndexRef.current && pipesToReveal < 50) {
+        if (pipesToReveal > revealedPipeIndexRef.current && pipesToReveal < 30) {
           revealedPipeIndexRef.current = pipesToReveal;
           socketRef.current.emit('reveal-pipe', {
             roomCode: roomCodeRef.current,
@@ -788,10 +804,12 @@ export default function MultiplayerRace3D() {
       for (let i = pipesRef.current.length - 1; i >= 0; i--) {
         const pipe = pipesRef.current[i];
         pipe.z += PIPE_SPEED;
-        pipe.bottom.position.z = pipe.z;
-        pipe.top.position.z = pipe.z;
-        pipe.bottomCap.position.z = pipe.z;
-        pipe.topCap.position.z = pipe.z;
+        
+        // Update pipe positions - keep them centered on player's X position
+        pipe.bottom.position.set(xOffset, pipe.bottom.position.y, pipe.z);
+        pipe.top.position.set(xOffset, pipe.top.position.y, pipe.z);
+        pipe.bottomCap.position.set(xOffset, pipe.bottomCap.position.y, pipe.z);
+        pipe.topCap.position.set(xOffset, pipe.topCap.position.y, pipe.z);
         
         // Score check (only for alive players)
         if (!gameOverRef.current && !pipe.passed && pipe.z > 0) {
@@ -812,9 +830,10 @@ export default function MultiplayerRace3D() {
           const BIRD_RADIUS = 0.8;
           const birdX = birdRef.current.position.x;
           const birdY = birdYRef.current;
+          const pipeX = pipe.bottom.position.x;
           
           // Check if bird is within pipe's X bounds (accounting for bird radius)
-          const isInPipeXRange = Math.abs(birdX) < pipe.width / 2 + BIRD_RADIUS;
+          const isInPipeXRange = Math.abs(birdX - pipeX) < pipe.width / 2 + BIRD_RADIUS;
           
           // Check if bird is outside the gap vertically (accounting for bird radius)
           const isOutsideGap = birdY < pipe.gapY - PIPE_GAP / 2 + BIRD_RADIUS || 
@@ -846,7 +865,7 @@ export default function MultiplayerRace3D() {
     const video = videoRef.current;
     if (!canvas || !video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
     
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for performance
     if (!ctx) return;
     
     ctx.save();
@@ -854,7 +873,8 @@ export default function MultiplayerRace3D() {
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
     
-    if (handLandmarkerRef.current && video.readyState === video.HAVE_ENOUGH_DATA) {
+    // Only draw hand landmarks every other webcam render for performance
+    if (frameCountRef.current % 6 === 0 && handLandmarkerRef.current && video.readyState === video.HAVE_ENOUGH_DATA) {
       const results = handLandmarkerRef.current.detectForVideo(video, performance.now());
       
       if (results?.landmarks && results.landmarks.length > 0) {
@@ -1055,7 +1075,7 @@ export default function MultiplayerRace3D() {
       {/* Webcam Corner View */}
       <div className="absolute top-4 right-4 z-50">
         <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)' }}>
-          <canvas ref={webcamCanvasRef} width={240} height={180} />
+          <canvas ref={webcamCanvasRef} width={160} height={120} />
         </div>
         <p className="text-center text-white mt-2 text-sm font-bold">Your Camera</p>
       </div>
