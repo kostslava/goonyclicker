@@ -6,7 +6,7 @@ import * as THREE from 'three';
 
 const MOVEMENT_THRESHOLD = 0.02;
 const DEFAULT_TIME_LIMIT = 120;
-const GRAVITY = -2.5;
+const GRAVITY = -1.2;
 const FLAP_STRENGTH = 10;
 const PIPE_SPEED = 0.15;
 const PIPE_GAP = 5.5;
