@@ -60,22 +60,29 @@ export default function MultiplayerRace() {
     const newSocket = io(window.location.origin, { transports: ['polling'] });
     
     newSocket.on('connect', () => {
+      console.log('Socket connected:', newSocket.id);
       setSocket(newSocket);
       socketRef.current = newSocket;
     });
 
     newSocket.on('room-created', ({ roomCode, playerId }) => {
+      console.log('Room created:', roomCode, 'Player ID:', playerId);
       setRoomCode(roomCode);
       roomCodeRef.current = roomCode;
       setMyPlayerId(playerId);
       setGameState('lobby');
     });
 
-    newSocket.on('player-joined', ({ players }) => {
+    newSocket.on('player-joined', ({ players, roomCode: joinedRoomCode }) => {
+      console.log('Player joined room:', joinedRoomCode, 'Players:', players);
       setPlayers(players);
+      setRoomCode(joinedRoomCode);
+      roomCodeRef.current = joinedRoomCode;
+      setGameState('lobby');
     });
 
     newSocket.on('game-start', ({ players, timeLimit }) => {
+      console.log('Game starting! Players:', players, 'Time limit:', timeLimit);
       setPlayers(players);
       setGameState('racing');
       setTimeLimit(timeLimit || DEFAULT_TIME_LIMIT);
@@ -105,12 +112,16 @@ export default function MultiplayerRace() {
     });
 
     newSocket.on('game-over', ({ winner }) => {
+      console.log('Game over! Winner:', winner);
       setWinner(winner);
       setGameState('winner');
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     });
 
-    newSocket.on('error', (msg) => setError(msg));
+    newSocket.on('error', (msg) => {
+      console.error('Socket error:', msg);
+      setError(msg);
+    });
 
     return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -376,8 +387,13 @@ export default function MultiplayerRace() {
       setError('Please enter your name');
       return;
     }
+    if (!socketRef.current || !socketRef.current.connected) {
+      setError('Connecting to server...');
+      return;
+    }
+    console.log('Creating room with name:', playerName, 'timeLimit:', timeLimit);
     setError('');
-    socket?.emit('create-room', { playerName, timeLimit });
+    socketRef.current.emit('create-room', { playerName, timeLimit });
   };
 
   const joinRoom = () => {
@@ -385,9 +401,15 @@ export default function MultiplayerRace() {
       setError('Please enter name and room code');
       return;
     }
+    if (!socketRef.current || !socketRef.current.connected) {
+      setError('Connecting to server...');
+      return;
+    }
+    const upperRoomCode = roomCode.toUpperCase();
+    console.log('Joining room:', upperRoomCode, 'with name:', playerName);
     setError('');
-    roomCodeRef.current = roomCode.toUpperCase();
-    socket?.emit('join-room', { roomCode: roomCode.toUpperCase(), playerName });
+    roomCodeRef.current = upperRoomCode;
+    socketRef.current.emit('join-room', { roomCode: upperRoomCode, playerName });
   };
 
   if (gameState === 'menu') {
