@@ -81,7 +81,6 @@ export default function MultiplayerRace3D() {
   const isGameRunningRef = useRef(false);
   const lastObstacleZRef = useRef(-25);
   const spectatingRef = useRef(false);
-  const spectateTargetsRef = useRef<string[]>([]);
 
   // Init Socket.io
   useEffect(() => {
@@ -120,7 +119,7 @@ export default function MultiplayerRace3D() {
       setGameState('racing');
       setTimeLimit(timeLimit || DEFAULT_TIME_LIMIT);
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
-      setAlivePlayers(new Set(players.map(p => p.id)));
+      setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = setInterval(() => {
@@ -206,7 +205,7 @@ export default function MultiplayerRace3D() {
       setGameState('racing');
       setTimeLimit(timeLimit || DEFAULT_TIME_LIMIT);
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
-      setAlivePlayers(new Set(players.map(p => p.id)));
+      setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setWinner(null);
       
       // Reset game state
