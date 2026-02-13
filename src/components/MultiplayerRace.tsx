@@ -63,6 +63,7 @@ export default function MultiplayerRace() {
       console.log('Socket connected:', newSocket.id);
       setSocket(newSocket);
       socketRef.current = newSocket;
+      setMyPlayerId(newSocket.id || '');
     });
 
     newSocket.on('room-created', ({ roomCode, playerId }) => {
@@ -107,7 +108,8 @@ export default function MultiplayerRace() {
 
     newSocket.on('score-update', ({ players }) => {
       setPlayers(players);
-      const opponent = players.find((p: Player) => p.id !== myPlayerId);
+      const myId = newSocket.id;
+      const opponent = players.find((p: Player) => p.id !== myId);
       if (opponent) setOpponentScore(opponent.score);
     });
 
@@ -127,7 +129,7 @@ export default function MultiplayerRace() {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       newSocket.close();
     };
-  }, [myPlayerId]);
+  }, []);
 
   const initHandTracking = async () => {
     try {
