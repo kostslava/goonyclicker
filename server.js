@@ -40,18 +40,19 @@ app.prepare().then(() => {
     console.log('Player connected:', socket.id);
     console.log('Active rooms:', Array.from(rooms.keys()));
 
-    socket.on('create-room', ({ playerName, timeLimit }) => {
+    socket.on('create-room', ({ playerName, difficulty, gameMode }) => {
       const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       const room = {
         players: [{ id: socket.id, name: playerName, score: 0, position: 0, multiplier: 1, currency: 0 }],
         creator: socket.id,
         gameStarted: false,
-        timeLimit: timeLimit || 120,
+        difficulty: difficulty || 'medium',
+        gameMode: gameMode || 'race',
       };
       rooms.set(roomCode, room);
       socket.join(roomCode);
       socket.emit('room-created', { roomCode, playerId: socket.id, players: room.players });
-      console.log(`Room created: ${roomCode} by ${playerName} with time limit ${timeLimit}s`);
+      console.log(`Room created: ${roomCode} by ${playerName} with difficulty ${difficulty} and mode ${gameMode}`);
       console.log('All rooms:', Array.from(rooms.keys()));
     });
 
@@ -99,8 +100,8 @@ app.prepare().then(() => {
       
       room.gameStarted = true;
       room.playersReady = new Set(); // Track ready players
-      console.log(`Game starting in room ${roomCode} with ${room.players.length} players, time limit ${room.timeLimit}s`);
-      io.to(roomCode).emit('game-start', { players: room.players, timeLimit: room.timeLimit });
+      console.log(`Game starting in room ${roomCode} with ${room.players.length} players, difficulty ${room.difficulty}, mode ${room.gameMode}`);
+      io.to(roomCode).emit('game-start', { players: room.players, difficulty: room.difficulty, gameMode: room.gameMode });
     });
 
     socket.on('game-over', ({ roomCode }) => {

@@ -9,32 +9,30 @@ const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
 const CEILING_LEVEL = 15;
 
-// Difficulty settings
+// Difficulty settings (no time limits, just game mechanics)
 const DIFFICULTY_SETTINGS = {
   easy: {
-    gravity: -0.3,
-    flapStrength: 8,
-    pipeSpeed: 0.06,
-    pipeGap: 7,
-    timeLimit: 180
+    gravity: -0.25,
+    flapStrength: 7,
+    pipeSpeed: 0.05,
+    pipeGap: 8
   },
   medium: {
     gravity: -0.4,
     flapStrength: 9,
     pipeSpeed: 0.08,
-    pipeGap: 6,
-    timeLimit: 120
+    pipeGap: 6
   },
   hard: {
-    gravity: -0.5,
-    flapStrength: 10,
-    pipeSpeed: 0.1,
-    pipeGap: 5,
-    timeLimit: 90
+    gravity: -0.6,
+    flapStrength: 11,
+    pipeSpeed: 0.12,
+    pipeGap: 5
   }
 };
 
 type Difficulty = keyof typeof DIFFICULTY_SETTINGS;
+type GameMode = 'race' | 'clicker';
 
 interface Player {
   id: string;
@@ -71,8 +69,9 @@ export default function MultiplayerRace3D() {
   const [winner, setWinner] = useState<Player | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
-  const [timeRemaining, setTimeRemaining] = useState(DIFFICULTY_SETTINGS.medium.timeLimit);
+  const [gameMode, setGameMode] = useState<GameMode>('race');
   const [isCreator, setIsCreator] = useState(false);
+  const [clickCount, setClickCount] = useState(0);
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isDead, setIsDead] = useState(false);
@@ -102,7 +101,6 @@ export default function MultiplayerRace3D() {
   const flapStrengthRef = useRef(9);
   const pipeSpeedRef = useRef(0.08);
   const pipeGapRef = useRef(6);
-  const timeLimitRef = useRef(120);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -153,8 +151,8 @@ export default function MultiplayerRace3D() {
 
     const initHandTrackingCallback = () => initHandTracking();
 
-    newSocket.on('game-start', ({ players, difficulty: gameDifficulty }) => {
-      console.log('Game starting! Players:', players, 'Difficulty:', gameDifficulty);
+    newSocket.on('game-start', ({ players, difficulty: gameDifficulty, gameMode: mode }) => {
+      console.log('Game starting! Players:', players, 'Difficulty:', gameDifficulty, 'Mode:', mode);
       setPlayers(players);
       setGameState('racing');
       
@@ -162,16 +160,16 @@ export default function MultiplayerRace3D() {
       const diff = (gameDifficulty || 'medium') as Difficulty;
       const settings = DIFFICULTY_SETTINGS[diff];
       setDifficulty(diff);
-      setTimeRemaining(settings.timeLimit);
+      setGameMode((mode || 'race') as GameMode);
       
       // Set game parameter refs
       gravityRef.current = settings.gravity;
       flapStrengthRef.current = settings.flapStrength;
       pipeSpeedRef.current = settings.pipeSpeed;
       pipeGapRef.current = settings.pipeGap;
-      timeLimitRef.current = settings.timeLimit;
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setIsDead(false);
+      setClickCount(0);
       setError('Initializing camera...');
       
       // Initialize camera and wait for ready signal
@@ -210,23 +208,6 @@ export default function MultiplayerRace3D() {
             isGameRunningRef.current = true;
             // Calculate exact game start time based on server time + countdown duration
             gameStartTimeRef.current = startTime + 3000; // Server time + 3 second countdown
-            
-            // Start timer that calculates from shared server time
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = setInterval(() => {
-              const elapsedMs = Date.now() - gameStartTimeRef.current;
-              const elapsedSeconds = Math.floor(elapsedMs / 1000);
-              const remaining = Math.max(0, timeLimitRef.current - elapsedSeconds);
-              
-              setTimeRemaining(remaining);
-              
-              if (remaining <= 0) {
-                if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-                setTimeout(() => {
-                  socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
-                }, 100);
-              }
-            }, 100); // Update every 100ms for better accuracy
             
             return null;
           }
@@ -399,7 +380,7 @@ export default function MultiplayerRace3D() {
     scene.background = new THREE.Color(0x87CEEB);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(75, 640 / 480, 0.1, 100); // Reduced far plane from 1000 to 100
+    const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 100); // Reduced far plane from 1000 to 100
     camera.position.set(0, 2, 10);
     camera.lookAt(0, 0, 0); // Look at bird starting position
     cameraRef.current = camera;
@@ -409,7 +390,7 @@ export default function MultiplayerRace3D() {
       powerPreference: 'low-power', // Prefer integrated GPU for better battery/performance
       precision: 'lowp' // Low precision for better performance
     });
-    renderer.setSize(640, 480);
+    renderer.setSize(800, 600);
     renderer.setPixelRatio(1); // Fixed at 1 for performance
     const container = containerRef.current;
     container.appendChild(renderer.domElement);
@@ -548,8 +529,8 @@ export default function MultiplayerRace3D() {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: 'user', 
-          width: { ideal: 240 }, 
-          height: { ideal: 240 },
+          width: { ideal: 480 }, 
+          height: { ideal: 480 },
           aspectRatio: { ideal: 1.0 } // Request square aspect ratio for MediaPipe
         }
       });
@@ -652,18 +633,20 @@ export default function MultiplayerRace3D() {
       });
     }
     
-    // Pre-create first 30 pipes (reduced from 50 for performance)
+    // Pre-create first 30 pipes (reduced from 50 for performance) - ONLY IN RACE MODE
     // Use deterministic seeds for consistent obstacle placement across all clients
-    const playerIndex = players.findIndex(p => p.id === myPlayerId);
-    const numPlayers = players.length;
-    const spacing = 6;
-    const totalWidth = (numPlayers - 1) * spacing;
-    const playerXOffset = playerIndex * spacing - totalWidth / 2;
-    
-    for (let i = 0; i < 30; i++) {
-      // Use a deterministic seed based on index for consistent random values
-      const seed = (Math.sin(i * 12.9898) + 1) / 2; // Generates value between 0 and 1
-      createObstacle(-25 - i * 25, false, seed, playerXOffset);
+    if (gameMode === 'race') {
+      const playerIndex = players.findIndex(p => p.id === myPlayerId);
+      const numPlayers = players.length;
+      const spacing = 6;
+      const totalWidth = (numPlayers - 1) * spacing;
+      const playerXOffset = playerIndex * spacing - totalWidth / 2;
+      
+      for (let i = 0; i < 30; i++) {
+        // Use a deterministic seed based on index for consistent random values
+        const seed = (Math.sin(i * 12.9898) + 1) / 2; // Generates value between 0 and 1
+        createObstacle(-25 - i * 25, false, seed, playerXOffset);
+      }
     }
     
     const gameLoop = (currentTime: number) => {
@@ -730,22 +713,41 @@ export default function MultiplayerRace3D() {
         if (lastHandYRef.current !== null) {
           const deltaY = handY - lastHandYRef.current;
           
-          // Hand moved up = flap
+          // Hand moved up = flap/click
           if (deltaY < -MOVEMENT_THRESHOLD) {
             birdVelocityRef.current = flapStrengthRef.current;
             console.log('FLAP!');
+            
+            // In clicker mode, count this as a click
+            if (gameMode === 'clicker') {
+              const newCount = clickCount + 1;
+              setClickCount(newCount);
+              
+              // Update score (every click = 1 point)
+              const newScore = newCount;
+              setMyScore(newScore);
+              
+              if (socketRef.current && roomCodeRef.current) {
+                socketRef.current.emit('update-score', { 
+                  roomCode: roomCodeRef.current, 
+                  score: newScore 
+                });
+              }
+            }
           }
         }
         
         lastHandYRef.current = handY;
       }
       
-      // Bird physics - using timeScale for consistent movement
-      birdVelocityRef.current += gravityRef.current * timeScale;
-      birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
-      birdRef.current.position.y = birdYRef.current;
-      birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
-    } else if (gameOverRef.current) {
+      // Bird physics - only in race mode
+      if (gameMode === 'race') {
+        birdVelocityRef.current += gravityRef.current * timeScale;
+        birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
+        birdRef.current.position.y = birdYRef.current;
+        birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
+      }
+    } else if (gameOverRef.current && gameMode === 'race') {
       // Death animation - make bird fall and fade
       birdVelocityRef.current += gravityRef.current * 1.5 * timeScale; // Fall faster when dead
       birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
@@ -763,14 +765,16 @@ export default function MultiplayerRace3D() {
       });
     }
     
-    // Position bird horizontally based on player index
-    const playerIndex = players.findIndex(p => p.id === myPlayerId);
-    const numPlayers = players.length;
-    const spacing = 6; // Spacing between birds on X axis
-    const totalWidth = (numPlayers - 1) * spacing;
-    const xOffset = playerIndex * spacing - totalWidth / 2;
-    birdRef.current.position.x = xOffset;
-    birdRef.current.position.z = 0; // Keep all birds at same depth
+    // Position bird horizontally based on player index - RACE MODE ONLY
+    if (gameMode === 'race') {
+      const playerIndex = players.findIndex(p => p.id === myPlayerId);
+      const numPlayers = players.length;
+      const spacing = 6; // Spacing between birds on X axis
+      const totalWidth = (numPlayers - 1) * spacing;
+      const xOffset = playerIndex * spacing - totalWidth / 2;
+      birdRef.current.position.x = xOffset;
+      birdRef.current.position.z = 0; // Keep all birds at same depth
+    }
     
     // Ensure bird stays at Y=0 during countdown (when game not running)
     if (!isGameRunningRef.current && !gameOverRef.current) {
@@ -779,18 +783,31 @@ export default function MultiplayerRace3D() {
       birdVelocityRef.current = 0;
     }
     
-    // Update opponent birds positions with interpolation for smooth movement
-    opponentBirdsRef.current.forEach((opponent, playerId) => {
-      const opponentIndex = players.findIndex(p => p.id === playerId);
-      const opponentXOffset = opponentIndex * spacing - totalWidth / 2;
+    // Update opponent birds positions with interpolation for smooth movement - RACE MODE ONLY
+    if (gameMode === 'race') {
+      const numPlayers = players.length;
+      const spacing = 6;
+      const totalWidth = (numPlayers - 1) * spacing;
       
-      // Smooth interpolation for Y position (lerp with factor 0.3 for responsiveness)
-      opponent.y += (opponent.targetY - opponent.y) * 0.3;
-      opponent.mesh.position.set(opponentXOffset, opponent.y, 0); // All birds at same depth
-    });
+      opponentBirdsRef.current.forEach((opponent, playerId) => {
+        const opponentIndex = players.findIndex(p => p.id === playerId);
+        const opponentXOffset = opponentIndex * spacing - totalWidth / 2;
+        
+        // Smooth interpolation for Y position (lerp with factor 0.3 for responsiveness)
+        opponent.y += (opponent.targetY - opponent.y) * 0.3;
+        opponent.mesh.position.set(opponentXOffset, opponent.y, 0); // All birds at same depth
+      });
+    }
     
-    // Camera follow - always track something
-    if (gameOverRef.current && alivePlayers.size >= 1) {
+    // Camera follow - always track something - RACE MODE ONLY
+    if (gameMode === 'race' && cameraRef.current) {
+      const playerIndex = players.findIndex(p => p.id === myPlayerId);
+      const numPlayers = players.length;
+      const spacing = 6;
+      const totalWidth = (numPlayers - 1) * spacing;
+      const xOffset = playerIndex * spacing - totalWidth / 2;
+      
+      if (gameOverRef.current && alivePlayers.size >= 1) {
       // Spectate alive players when dead
       spectatingRef.current = true;
       
@@ -826,6 +843,7 @@ export default function MultiplayerRace3D() {
       cameraRef.current.position.x += (xOffset - cameraRef.current.position.x) * lerpFactor;
       cameraRef.current.lookAt(xOffset, birdYRef.current, 0);
       spectatingRef.current = gameOverRef.current && alivePlayers.size > 0;
+      }
     }
     
     // Broadcast position at max 25ms intervals (40 FPS) for smooth real-time sync
@@ -841,8 +859,8 @@ export default function MultiplayerRace3D() {
     }
     
     // Only update game state when game is running (after countdown)
-    if (isGameRunningRef.current) {
-      // Bounds check (only for alive players)
+    if (isGameRunningRef.current && gameMode === 'race') {
+      // Bounds check (only for alive players in race mode)
       if (!gameOverRef.current) {
         if (birdYRef.current > CEILING_LEVEL - 0.8 || birdYRef.current < GROUND_LEVEL + 0.8) {
           gameOverRef.current = true;
@@ -879,6 +897,13 @@ export default function MultiplayerRace3D() {
           }
         }
       }
+      
+      // Calculate player position offset for pipes
+      const playerIndex = players.findIndex(p => p.id === myPlayerId);
+      const numPlayers = players.length;
+      const spacing = 6;
+      const totalWidth = (numPlayers - 1) * spacing;
+      const xOffset = playerIndex * spacing - totalWidth / 2;
       
       // Update pipes - using DETERMINISTIC position calculation (no accumulation)
       // ALL clients calculate the exact same position based on elapsed game time
@@ -1011,7 +1036,7 @@ export default function MultiplayerRace3D() {
       return;
     }
     setError('');
-    socketRef.current.emit('create-room', { playerName, difficulty });
+    socketRef.current.emit('create-room', { playerName, difficulty, gameMode });
   };
 
   const joinRoom = () => {
@@ -1038,9 +1063,9 @@ export default function MultiplayerRace3D() {
     return (
       <div className="flex min-h-screen w-full bg-black text-white flex-col items-center justify-center p-4">
         <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
-          Hand Gesture Bird Race
+          Hand Gesture Multiplayer
         </h1>
-        <p className="text-xl text-gray-400 mb-12">Move your hand up to flap!</p>
+        <p className="text-xl text-gray-400 mb-12">Move your hand to play!</p>
         
         <div className="max-w-md w-full space-y-6">
           <input
@@ -1052,15 +1077,27 @@ export default function MultiplayerRace3D() {
           />
           
           <div>
+            <label className="block text-sm text-gray-400 mb-2">Game Mode</label>
+            <select
+              value={gameMode}
+              onChange={(e) => setGameMode(e.target.value as GameMode)}
+              className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
+            >
+              <option value="race">🐦 Flappy Bird Race</option>
+              <option value="clicker">🍪 Cookie Clicker</option>
+            </select>
+          </div>
+          
+          <div>
             <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value as Difficulty)}
               className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
             >
-              <option value="easy">Easy (3 min)</option>
-              <option value="medium">Medium (2 min)</option>
-              <option value="hard">Hard (90 sec)</option>
+              <option value="easy">Easy (Slower, Easier)</option>
+              <option value="medium">Medium (Normal)</option>
+              <option value="hard">Hard (Faster, Harder)</option>
             </select>
           </div>
           
@@ -1168,10 +1205,32 @@ export default function MultiplayerRace3D() {
 
   return (
     <div className="relative min-h-screen w-full bg-black flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '240px', height: '240px' }} />
+      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '480px', height: '480px' }} />
       
-      {/* Game Canvas */}
-      <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
+      {/* Game Canvas - Only for race mode */}
+      {gameMode === 'race' && (
+        <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
+      )}
+      
+      {/* Clicker Mode UI */}
+      {gameMode === 'clicker' && (
+        <div className="flex flex-col items-center justify-center">
+          <div className="text-center mb-8">
+            <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
+              🍪 Cookie Clicker
+            </h1>
+            <p className="text-3xl text-cyan-400 mb-2">Move your hand up to click!</p>
+          </div>
+          
+          <div className="bg-gray-900 border-4 border-cyan-500 rounded-lg p-12 mb-8" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }}>
+            <div className="text-center">
+              <div className="text-9xl mb-4 animate-pulse">🍪</div>
+              <p className="text-6xl font-bold text-cyan-400 mb-2">{clickCount}</p>
+              <p className="text-2xl text-gray-400">Total Clicks</p>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Webcam Corner View */}
       <div className="absolute top-4 right-4 z-50">
@@ -1183,20 +1242,20 @@ export default function MultiplayerRace3D() {
       
       {/* Scoreboard */}
       <div className="absolute top-4 left-4 bg-black bg-opacity-80 px-4 py-3 rounded-lg border-2 border-cyan-500 z-20">
+        {gameMode === 'clicker' && (
+          <p className="text-2xl font-bold text-cyan-400 mb-2">🍪 Cookie Clicker Mode</p>
+        )}
         {players.map((player) => (
           <p key={player.id} className="text-xl font-bold" style={{ color: player.id === myPlayerId ? '#00f5ff' : '#ffffff' }}>
             {player.name}: {player.score}
             {player.id === myPlayerId && ' (You)'}
           </p>
         ))}
+        {gameMode === 'clicker' && myPlayerId && (
+          <p className="text-lg text-cyan-300 mt-2">Clicks: {clickCount}</p>
+        )}
       </div>
       
-      {/* Timer - Highly visible */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-90 px-8 py-4 rounded-lg border-4 border-cyan-400 z-30" style={{ boxShadow: '0 0 25px rgba(0, 245, 255, 0.8)' }}>
-        <p className="text-5xl font-bold text-cyan-400" style={{ textShadow: '0 0 15px #00f5ff, 0 0 30px #00f5ff' }}>
-          {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
-        </p>
-      </div>
       
       {/* Countdown Overlay */}
       {countdown !== null && (
@@ -1207,8 +1266,8 @@ export default function MultiplayerRace3D() {
         </div>
       )}
       
-      {/* Death Indicator */}
-      {isDead && (
+      {/* Death Indicator - Only for race mode */}
+      {isDead && gameMode === 'race' && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
           <div className="text-center">
             <h1 className="text-8xl font-bold text-red-600 animate-pulse" style={{ textShadow: '0 0 40px #ff0000' }}>
