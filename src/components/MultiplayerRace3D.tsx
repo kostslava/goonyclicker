@@ -908,18 +908,13 @@ export default function MultiplayerRace3D() {
     const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for performance
     if (!ctx) return;
     
-    // Clear canvas first
+    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Get actual video dimensions
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
-    
-    // Draw mirrored video - stretch to fill canvas
+    // Draw mirrored video
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.translate(-canvas.width, 0);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
     
     // Draw hand landmarks
@@ -933,9 +928,8 @@ export default function MultiplayerRace3D() {
         ctx.strokeStyle = '#00f5ff';
         ctx.lineWidth = 2;
         
-        // landmarks are normalized 0-1 coordinates
-        // Scale them to canvas dimensions (which may differ from video dimensions)
-        // and mirror X to match the mirrored video display
+        // MediaPipe landmarks are normalized (0-1)
+        // Scale directly to canvas size and mirror X
         hand.forEach((landmark) => {
           const x = canvas.width - (landmark.x * canvas.width);
           const y = landmark.y * canvas.height;
