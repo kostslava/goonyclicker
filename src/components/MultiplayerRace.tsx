@@ -864,6 +864,16 @@ export default function MultiplayerRace() {
     ctx.restore();
   };
 
+  const createRoom = () => {
+    if (!playerName.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+    console.log('Creating room as:', playerName, 'Time limit:', timeLimit);
+    setError(''); // Clear previous errors
+    socket?.emit('create-room', { playerName, timeLimit });
+  };
+
   const joinRoom = () => {
     if (!playerName.trim() || !roomCode.trim()) {
       setError('Please enter name and room code');
