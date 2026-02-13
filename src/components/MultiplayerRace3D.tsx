@@ -51,6 +51,7 @@ export default function MultiplayerRace3D() {
   const [timeRemaining, setTimeRemaining] = useState(DEFAULT_TIME_LIMIT);
   const [isCreator, setIsCreator] = useState(false);
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
+  const [countdown, setCountdown] = useState<number | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -121,21 +122,37 @@ export default function MultiplayerRace3D() {
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev <= 1) {
+      // Start countdown
+      setCountdown(3);
+      const countdownInterval = setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval);
+            setCountdown(null);
+            
+            // Start the actual game
+            setTimeout(initHandTrackingCallback, 100);
+            
+            // Start timer
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            setTimeout(() => {
-              socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
-            }, 100);
-            return 0;
+            timerIntervalRef.current = setInterval(() => {
+              setTimeRemaining(prev => {
+                if (prev <= 1) {
+                  if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+                  setTimeout(() => {
+                    socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
+                  }, 100);
+                  return 0;
+                }
+                return prev - 1;
+              });
+            }, 1000);
+            
+            return null;
           }
           return prev - 1;
         });
       }, 1000);
-      
-      setTimeout(initHandTrackingCallback, 500);
     });
 
     newSocket.on('score-update', ({ players }) => {
@@ -202,8 +219,6 @@ export default function MultiplayerRace3D() {
     newSocket.on('game-restart', ({ players, timeLimit }) => {
       console.log('Game restarting! Players:', players);
       setPlayers(players);
-      setGameState('racing');
-      setTimeLimit(timeLimit || DEFAULT_TIME_LIMIT);
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setWinner(null);
@@ -211,13 +226,10 @@ export default function MultiplayerRace3D() {
       // Reset game state
       birdYRef.current = 0;
       birdVelocityRef.current = 0;
-      pipesRef.current = [];
       gameOverRef.current = false;
       frameCountRef.current = 0;
       lastObstacleZRef.current = -25;
-      isGameRunningRef.current = true;
       repStateRef.current = 'waiting';
-      setMyScore(0);
       
       // Clear existing pipes from scene
       pipesRef.current.forEach(pipe => {
@@ -226,21 +238,40 @@ export default function MultiplayerRace3D() {
         sceneRef.current?.remove(pipe.bottomCap);
         sceneRef.current?.remove(pipe.topCap);
       });
+      pipesRef.current = [];
       
       // Create new pipes
       for (let i = 0; i < 5; i++) {
         createObstacle(-25 - i * 25);
       }
       
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev <= 1) {
+      // Start countdown
+      setCountdown(3);
+      const countdownInterval = setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval);
+            setCountdown(null);
+            
+            // Start the game running
+            isGameRunningRef.current = true;
+            
+            // Start timer
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            setTimeout(() => {
-              socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
-            }, 100);
-            return 0;
+            timerIntervalRef.current = setInterval(() => {
+              setTimeRemaining(prev => {
+                if (prev <= 1) {
+                  if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+                  setTimeout(() => {
+                    socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
+                  }, 100);
+                  return 0;
+                }
+                return prev - 1;
+              });
+            }, 1000);
+            
+            return null;
           }
           return prev - 1;
         });
@@ -477,44 +508,47 @@ export default function MultiplayerRace3D() {
   };
 
   const updateGame = () => {
-    if (gameOverRef.current || !birdRef.current || !sceneRef.current || !cameraRef.current) return;
+    if (!birdRef.current || !sceneRef.current || !cameraRef.current) return;
     
-    // Hand detection (reduced frequency for performance)
-    if (
-      frameCountRef.current % 3 === 0 && // Process every third frame
-      videoRef.current &&
-      handLandmarkerRef.current &&
-      videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
-    ) {
-      const results = handLandmarkerRef.current.detectForVideo(videoRef.current, performance.now());
-      
-      if (results?.landmarks && results.landmarks.length > 0) {
-        const hand = results.landmarks[0] as Array<{ x: number; y: number; z: number }>;
-        const wrist = hand[0];
-        const handY = wrist.y;
+    // Only process player physics and input if player is alive
+    if (!gameOverRef.current) {
+      // Hand detection (reduced frequency for performance)
+      if (
+        frameCountRef.current % 3 === 0 && // Process every third frame
+        videoRef.current &&
+        handLandmarkerRef.current &&
+        videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
+      ) {
+        const results = handLandmarkerRef.current.detectForVideo(videoRef.current, performance.now());
         
-        if (lastHandYRef.current !== null) {
-          const deltaY = handY - lastHandYRef.current;
+        if (results?.landmarks && results.landmarks.length > 0) {
+          const hand = results.landmarks[0] as Array<{ x: number; y: number; z: number }>;
+          const wrist = hand[0];
+          const handY = wrist.y;
           
-          if (repStateRef.current === 'waiting' && deltaY < -MOVEMENT_THRESHOLD) {
-            // Started moving up
-            repStateRef.current = 'up';
-          } else if (repStateRef.current === 'up' && deltaY > MOVEMENT_THRESHOLD) {
-            // Completed rep: moved up then down
-            repStateRef.current = 'waiting';
-            birdVelocityRef.current = FLAP_STRENGTH;
+          if (lastHandYRef.current !== null) {
+            const deltaY = handY - lastHandYRef.current;
+            
+            if (repStateRef.current === 'waiting' && deltaY < -MOVEMENT_THRESHOLD) {
+              // Started moving up
+              repStateRef.current = 'up';
+            } else if (repStateRef.current === 'up' && deltaY > MOVEMENT_THRESHOLD) {
+              // Completed rep: moved up then down
+              repStateRef.current = 'waiting';
+              birdVelocityRef.current = FLAP_STRENGTH;
+            }
           }
+          
+          lastHandYRef.current = handY;
         }
-        
-        lastHandYRef.current = handY;
       }
+      
+      // Bird physics
+      birdVelocityRef.current += GRAVITY;
+      birdYRef.current += birdVelocityRef.current * 0.01;
+      birdRef.current.position.y = birdYRef.current;
+      birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
     }
-    
-    // Bird physics
-    birdVelocityRef.current += GRAVITY;
-    birdYRef.current += birdVelocityRef.current * 0.01;
-    birdRef.current.position.y = birdYRef.current;
-    birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
     
     // Position bird horizontally based on player index
     const playerIndex = players.findIndex(p => p.id === myPlayerId);
@@ -576,18 +610,19 @@ export default function MultiplayerRace3D() {
       });
     }
     
-    // Bounds check
-    if (birdYRef.current > CEILING_LEVEL - 0.8 || birdYRef.current < GROUND_LEVEL + 0.8) {
-      gameOverRef.current = true;
-      if (socketRef.current && roomCodeRef.current) {
-        socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
+    // Bounds check (only for alive players)
+    if (!gameOverRef.current) {
+      if (birdYRef.current > CEILING_LEVEL - 0.8 || birdYRef.current < GROUND_LEVEL + 0.8) {
+        gameOverRef.current = true;
+        if (socketRef.current && roomCodeRef.current) {
+          socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
+        }
       }
-      return;
     }
     
-    // Pipe generation
+    // Pipe generation (only when alive)
     frameCountRef.current++;
-    if (frameCountRef.current % 100 === 0) { // Generate pipes more frequently for better gameplay
+    if (!gameOverRef.current && frameCountRef.current % 100 === 0) {
       lastObstacleZRef.current -= 25;
       createObstacle(lastObstacleZRef.current);
     }
@@ -601,8 +636,8 @@ export default function MultiplayerRace3D() {
       pipe.bottomCap.position.z = pipe.z;
       pipe.topCap.position.z = pipe.z;
       
-      // Score check
-      if (!pipe.passed && pipe.z > 0) {
+      // Score check (only for alive players)
+      if (!gameOverRef.current && !pipe.passed && pipe.z > 0) {
         pipe.passed = true;
         const newScore = myScore + 1;
         setMyScore(newScore);
@@ -615,8 +650,8 @@ export default function MultiplayerRace3D() {
         }
       }
       
-      // Collision check
-      if (pipe.z > -2.5 && pipe.z < 2.5) {
+      // Collision check (only for alive players)
+      if (!gameOverRef.current && pipe.z > -2.5 && pipe.z < 2.5) {
         if (birdYRef.current < pipe.gapY - PIPE_GAP / 2 || birdYRef.current > pipe.gapY + PIPE_GAP / 2) {
           if (Math.abs(birdRef.current.position.x) < pipe.width / 2) {
             gameOverRef.current = true;
@@ -873,6 +908,15 @@ export default function MultiplayerRace3D() {
           {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
         </p>
       </div>
+      
+      {/* Countdown Overlay */}
+      {countdown !== null && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <h1 className="text-9xl font-bold text-white animate-pulse" style={{ textShadow: '0 0 40px #00f5ff' }}>
+            {countdown === 0 ? 'GO!' : countdown}
+          </h1>
+        </div>
+      )}
       
       {!isTracking && (
         <div className="absolute inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50">
