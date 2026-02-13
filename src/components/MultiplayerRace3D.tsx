@@ -961,14 +961,12 @@ export default function MultiplayerRace3D() {
     const results = detectionResultsRef.current;
     if (results?.landmarks && results.landmarks.length > 0) {
       const hand = results.landmarks[0];
+      const wrist = hand[0];
       
-      // Debug: Log first landmark and dimensions (only occasionally to avoid spam)
-      if (Math.random() < 0.01) {
-        const wrist = hand[0];
-        console.log('📍 Canvas:', canvas.width, 'x', canvas.height, '| Video:', vw, 'x', vh);
-        console.log('📍 Raw landmark[0]:', wrist.x.toFixed(3), ',', wrist.y.toFixed(3));
-        console.log('📍 Scaled to:', Math.round(canvas.width - wrist.x * canvas.width), ',', Math.round(wrist.y * canvas.height));
-      }
+      // Always log to see actual values
+      console.log('🖐️ Wrist raw:', wrist.x.toFixed(3), wrist.y.toFixed(3), wrist.z?.toFixed(3));
+      console.log('🖐️ Canvas dims:', canvas.width, 'x', canvas.height);
+      console.log('🖐️ Calculated pixel:', Math.round(canvas.width - wrist.x * canvas.width), ',', Math.round(wrist.y * canvas.height));
       
       ctx.fillStyle = '#00f5ff';
       ctx.strokeStyle = '#00f5ff';
@@ -1162,8 +1160,8 @@ export default function MultiplayerRace3D() {
       
       {/* Webcam Corner View */}
       <div className="absolute top-4 right-4 z-50">
-        <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)', maxWidth: '280px' }}>
-          <canvas ref={webcamCanvasRef} style={{ width: '100%', height: 'auto', display: 'block', maxWidth: 'none' }} />
+        <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)' }}>
+          <canvas ref={webcamCanvasRef} style={{ display: 'block' }} />
         </div>
         <p className="text-center text-white mt-2 text-sm font-bold">Your Camera</p>
       </div>
