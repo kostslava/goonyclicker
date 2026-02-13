@@ -6,8 +6,8 @@ import * as THREE from 'three';
 
 const MOVEMENT_THRESHOLD = 0.015;
 const DEFAULT_TIME_LIMIT = 120;
-const GRAVITY = -1.2;
-const FLAP_STRENGTH = 18;
+const GRAVITY = -0.8;
+const FLAP_STRENGTH = 12;
 const PIPE_SPEED = 0.15;
 const PIPE_GAP = 5.5;
 const PIPE_WIDTH = 6;
@@ -268,15 +268,8 @@ export default function MultiplayerRace3D() {
         const newAlive = new Set(prev);
         newAlive.delete(playerId);
         
-        // Check if all players are dead
-        if (newAlive.size === 0) {
-          // All players dead, restart after short delay
-          setTimeout(() => {
-            socketRef.current?.emit('restart-game', { roomCode: roomCodeRef.current });
-          }, 2000);
-        }
-        // Check if only one player left
-        else if (newAlive.size === 1) {
+        // Check if only one player left (winner)
+        if (newAlive.size === 1) {
           const winnerId = Array.from(newAlive)[0];
           const winnerPlayer = players.find(p => p.id === winnerId);
           if (winnerPlayer) {
@@ -286,72 +279,79 @@ export default function MultiplayerRace3D() {
               score: winnerPlayer.score + 1 
             });
             
-            // Restart game after a short delay
+            // Send winner signal to go back to lobby
             setTimeout(() => {
-              socketRef.current?.emit('restart-game', { roomCode: roomCodeRef.current });
+              socketRef.current?.emit('winner-found', { 
+                roomCode: roomCodeRef.current,
+                winnerId 
+              });
             }, 2000);
           }
+        }
+        // Check if all players are dead (tie)
+        else if (newAlive.size === 0) {
+          // All players dead, go back to lobby
+          setTimeout(() => {
+            socketRef.current?.emit('winner-found', { 
+              roomCode: roomCodeRef.current,
+              winnerId: null
+            });
+          }, 2000);
         }
         
         return newAlive;
       });
     });
 
-    newSocket.on('game-restart', ({ players, timeLimit }) => {
-      console.log('Game restarting! Players:', players);
-      setPlayers(players);
-      setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
-      setAlivePlayers(new Set(players.map((p: Player) => p.id)));
-      setWinner(null);
-      setError('Preparing for restart...');
+    newSocket.on('return-to-lobby', ({ players }) => {
+      console.log('Returning to lobby! Players:', players);
       
-      // Reset game state
-      birdYRef.current = 0;
-      birdVelocityRef.current = 0;
-      gameOverRef.current = false;
+      // Stop game
       isGameRunningRef.current = false;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      if (readyTimeoutRef.current) {
+        clearTimeout(readyTimeoutRef.current);
+        readyTimeoutRef.current = null;
+      }
+      
+      // Stop webcam
+      if (videoRef.current?.srcObject) {
+        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+        tracks.forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+      }
+      
+      // Clear tracking
+      setIsTracking(false);
+      handLandmarkerRef.current = null;
+      
+      // Update players and go to lobby
+      setPlayers(players);
+      setGameState('lobby');
+      setWinner(null);
+      setError('');
       setIsDead(false);
-      frameCountRef.current = 0;
-      lastObstacleZRef.current = -25;
       
-      // Reset bird opacity
-      if (birdRef.current) {
-        birdRef.current.rotation.z = 0;
-        birdRef.current.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            if (child.material instanceof THREE.MeshPhongMaterial) {
-              child.material.transparent = false;
-              child.material.opacity = 1.0;
-            }
-          }
+      // Clear scene
+      if (sceneRef.current) {
+        pipesRef.current.forEach(pipe => {
+          sceneRef.current?.remove(pipe.bottom);
+          sceneRef.current?.remove(pipe.top);
+          sceneRef.current?.remove(pipe.bottomCap);
+          sceneRef.current?.remove(pipe.topCap);
         });
+        opponentBirdsRef.current.forEach(opponent => {
+          sceneRef.current?.remove(opponent.mesh);
+        });
+        opponentBirdsRef.current.clear();
       }
-      
-      // Clear existing pipes from scene
-      pipesRef.current.forEach(pipe => {
-        sceneRef.current?.remove(pipe.bottom);
-        sceneRef.current?.remove(pipe.top);
-        sceneRef.current?.remove(pipe.bottomCap);
-        sceneRef.current?.remove(pipe.topCap);
-      });
-      pipesRef.current = [];
-      
-      // Create new pipes
-      for (let i = 0; i < 5; i++) {
-        createObstacle(-25 - i * 25);
-      }
-      
-      // Signal player is ready for restart
-      if (socketRef.current && roomCodeRef.current) {
-        socketRef.current.emit('player-ready', { roomCode: roomCodeRef.current });
-        setError(''); // Clear status after signaling ready
-      }
-      
-      // Fallback: auto-start after 10 seconds even if not all players ready
-      readyTimeoutRef.current = setTimeout(() => {
-        console.log('Restart timeout reached, forcing game start');
-        newSocket.emit('force-start-countdown', { roomCode: roomCodeRef.current });
-      }, 10000);
     });
 
     newSocket.on('error', (msg) => {
@@ -604,9 +604,11 @@ export default function MultiplayerRace3D() {
       });
     }
     
-    // Create initial pipes
-    for (let i = 0; i < 5; i++) {
-      createObstacle(-25 - i * 25);
+    // Create initial pipes - ONLY if room creator
+    if (isRoomCreatorRef.current) {
+      for (let i = 0; i < 5; i++) {
+        createObstacle(-25 - i * 25);
+      }
     }
     
     const gameLoop = () => {
@@ -918,7 +920,7 @@ export default function MultiplayerRace3D() {
     return (
       <div className="flex min-h-screen w-full bg-black text-white flex-col items-center justify-center p-4">
         <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
-          FLAPPY GOON 3D
+          Hand Gesture Bird Race
         </h1>
         <p className="text-xl text-gray-400 mb-12">Move your hand up to flap!</p>
         

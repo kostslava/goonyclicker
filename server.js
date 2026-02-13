@@ -167,6 +167,18 @@ app.prepare().then(() => {
       io.to(roomCode).emit('player-died', { playerId: socket.id });
     });
 
+    socket.on('winner-found', ({ roomCode, winnerId }) => {
+      console.log(`Winner found in room ${roomCode}: ${winnerId}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Reset game state and send everyone back to lobby
+      room.gameStarted = false;
+      
+      console.log(`Sending players back to lobby in room ${roomCode}`);
+      io.to(roomCode).emit('return-to-lobby', { players: room.players });
+    });
+
     socket.on('restart-game', ({ roomCode }) => {
       console.log(`Game restart requested for room ${roomCode}`);
       const room = rooms.get(roomCode);
