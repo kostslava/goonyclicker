@@ -52,6 +52,7 @@ export default function MultiplayerRace3D() {
   const [isCreator, setIsCreator] = useState(false);
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [isDead, setIsDead] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -121,6 +122,7 @@ export default function MultiplayerRace3D() {
       setTimeLimit(timeLimit || DEFAULT_TIME_LIMIT);
       setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
+      setIsDead(false);
       
       // Start countdown
       setCountdown(3);
@@ -227,9 +229,23 @@ export default function MultiplayerRace3D() {
       birdYRef.current = 0;
       birdVelocityRef.current = 0;
       gameOverRef.current = false;
+      setIsDead(false);
       frameCountRef.current = 0;
       lastObstacleZRef.current = -25;
       repStateRef.current = 'waiting';
+      
+      // Reset bird opacity
+      if (birdRef.current) {
+        birdRef.current.rotation.z = 0;
+        birdRef.current.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            if (child.material instanceof THREE.MeshPhongMaterial) {
+              child.material.transparent = false;
+              child.material.opacity = 1.0;
+            }
+          }
+        });
+      }
       
       // Clear existing pipes from scene
       pipesRef.current.forEach(pipe => {
@@ -485,7 +501,21 @@ export default function MultiplayerRace3D() {
     lastObstacleZRef.current = -25;
     isGameRunningRef.current = true;
     setMyScore(0);
+    setIsDead(false);
     repStateRef.current = 'waiting';
+    
+    // Reset bird visual state
+    if (birdRef.current) {
+      birdRef.current.rotation.z = 0;
+      birdRef.current.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (child.material instanceof THREE.MeshPhongMaterial) {
+            child.material.transparent = false;
+            child.material.opacity = 1.0;
+          }
+        }
+      });
+    }
     
     // Create initial pipes
     for (let i = 0; i < 5; i++) {
@@ -548,6 +578,22 @@ export default function MultiplayerRace3D() {
       birdYRef.current += birdVelocityRef.current * 0.01;
       birdRef.current.position.y = birdYRef.current;
       birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
+    } else {
+      // Death animation - make bird fall and fade
+      birdVelocityRef.current += GRAVITY * 1.5; // Fall faster when dead
+      birdYRef.current += birdVelocityRef.current * 0.01;
+      birdRef.current.position.y = birdYRef.current;
+      birdRef.current.rotation.z += 0.05; // Spin while falling
+      
+      // Fade out the bird
+      birdRef.current.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (child.material instanceof THREE.MeshPhongMaterial) {
+            child.material.transparent = true;
+            child.material.opacity = Math.max(0.3, child.material.opacity - 0.01);
+          }
+        }
+      });
     }
     
     // Position bird horizontally based on player index
@@ -601,8 +647,8 @@ export default function MultiplayerRace3D() {
       spectatingRef.current = false;
     }
     
-    // Broadcast position (reduced frequency for performance)
-    if (socketRef.current && roomCodeRef.current && frameCountRef.current % 5 === 0) {
+    // Broadcast position every frame for real-time sync
+    if (socketRef.current && roomCodeRef.current) {
       socketRef.current.emit('update-position', {
         roomCode: roomCodeRef.current,
         y: birdYRef.current,
@@ -614,6 +660,7 @@ export default function MultiplayerRace3D() {
     if (!gameOverRef.current) {
       if (birdYRef.current > CEILING_LEVEL - 0.8 || birdYRef.current < GROUND_LEVEL + 0.8) {
         gameOverRef.current = true;
+        setIsDead(true);
         if (socketRef.current && roomCodeRef.current) {
           socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
         }
@@ -655,6 +702,7 @@ export default function MultiplayerRace3D() {
         if (birdYRef.current < pipe.gapY - PIPE_GAP / 2 || birdYRef.current > pipe.gapY + PIPE_GAP / 2) {
           if (Math.abs(birdRef.current.position.x) < pipe.width / 2) {
             gameOverRef.current = true;
+            setIsDead(true);
             if (socketRef.current && roomCodeRef.current) {
               socketRef.current.emit('player-died', { roomCode: roomCodeRef.current });
             }
@@ -915,6 +963,20 @@ export default function MultiplayerRace3D() {
           <h1 className="text-9xl font-bold text-white animate-pulse" style={{ textShadow: '0 0 40px #00f5ff' }}>
             {countdown === 0 ? 'GO!' : countdown}
           </h1>
+        </div>
+      )}
+      
+      {/* Death Indicator */}
+      {isDead && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+          <div className="text-center">
+            <h1 className="text-8xl font-bold text-red-600 animate-pulse" style={{ textShadow: '0 0 40px #ff0000' }}>
+              YOU DIED
+            </h1>
+            <p className="text-3xl text-white mt-4" style={{ textShadow: '0 0 20px #000000' }}>
+              Spectating...
+            </p>
+          </div>
         </div>
       )}
       
