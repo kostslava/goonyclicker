@@ -85,7 +85,7 @@ export default function MultiplayerRace() {
   useEffect(() => {
     console.log('Connecting to server at:', window.location.origin);
     const newSocket = io(window.location.origin, {
-      transports: ['websocket', 'polling']
+      transports: ['polling'] // Force polling only for Vercel compatibility
     });
     
     newSocket.on('connect', () => {
