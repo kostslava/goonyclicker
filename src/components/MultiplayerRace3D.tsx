@@ -5,14 +5,36 @@ import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
 const MOVEMENT_THRESHOLD = 0.02;
-const DEFAULT_TIME_LIMIT = 120;
-const GRAVITY = -0.8;
-const FLAP_STRENGTH = 12;
-const PIPE_SPEED = 0.15;
-const PIPE_GAP = 5.5;
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
 const CEILING_LEVEL = 15;
+
+// Difficulty settings
+const DIFFICULTY_SETTINGS = {
+  easy: {
+    gravity: -0.3,
+    flapStrength: 8,
+    pipeSpeed: 0.06,
+    pipeGap: 7,
+    timeLimit: 180
+  },
+  medium: {
+    gravity: -0.4,
+    flapStrength: 9,
+    pipeSpeed: 0.08,
+    pipeGap: 6,
+    timeLimit: 120
+  },
+  hard: {
+    gravity: -0.5,
+    flapStrength: 10,
+    pipeSpeed: 0.1,
+    pipeGap: 5,
+    timeLimit: 90
+  }
+};
+
+type Difficulty = keyof typeof DIFFICULTY_SETTINGS;
 
 interface Player {
   id: string;
@@ -48,8 +70,8 @@ export default function MultiplayerRace3D() {
   const [error, setError] = useState('');
   const [winner, setWinner] = useState<Player | null>(null);
   const [isTracking, setIsTracking] = useState(false);
-  const [timeLimit, setTimeLimit] = useState(DEFAULT_TIME_LIMIT);
-  const [timeRemaining, setTimeRemaining] = useState(DEFAULT_TIME_LIMIT);
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+  const [timeRemaining, setTimeRemaining] = useState(DIFFICULTY_SETTINGS.medium.timeLimit);
   const [isCreator, setIsCreator] = useState(false);
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -74,6 +96,13 @@ export default function MultiplayerRace3D() {
   const gameStartTimeRef = useRef<number>(0);
   const sharedStartTimeRef = useRef<number>(0);
   const lastFrameTimeRef = useRef<number>(0);
+  
+  // Game settings refs
+  const gravityRef = useRef(-0.4);
+  const flapStrengthRef = useRef(9);
+  const pipeSpeedRef = useRef(0.08);
+  const pipeGapRef = useRef(6);
+  const timeLimitRef = useRef(120);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -124,12 +153,23 @@ export default function MultiplayerRace3D() {
 
     const initHandTrackingCallback = () => initHandTracking();
 
-    newSocket.on('game-start', ({ players, timeLimit }) => {
-      console.log('Game starting! Players:', players, 'Time limit:', timeLimit);
+    newSocket.on('game-start', ({ players, difficulty: gameDifficulty }) => {
+      console.log('Game starting! Players:', players, 'Difficulty:', gameDifficulty);
       setPlayers(players);
       setGameState('racing');
-      setTimeLimit(timeLimit || DEFAULT_TIME_LIMIT);
-      setTimeRemaining(timeLimit || DEFAULT_TIME_LIMIT);
+      
+      // Set difficulty and game parameters
+      const diff = (gameDifficulty || 'medium') as Difficulty;
+      const settings = DIFFICULTY_SETTINGS[diff];
+      setDifficulty(diff);
+      setTimeRemaining(settings.timeLimit);
+      
+      // Set game parameter refs
+      gravityRef.current = settings.gravity;
+      flapStrengthRef.current = settings.flapStrength;
+      pipeSpeedRef.current = settings.pipeSpeed;
+      pipeGapRef.current = settings.pipeGap;
+      timeLimitRef.current = settings.timeLimit;
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setIsDead(false);
       setError('Initializing camera...');
@@ -175,7 +215,7 @@ export default function MultiplayerRace3D() {
             timerIntervalRef.current = setInterval(() => {
               const elapsedMs = Date.now() - sharedStartTimeRef.current;
               const elapsedSeconds = Math.floor(elapsedMs / 1000);
-              const remaining = Math.max(0, timeLimit - elapsedSeconds);
+              const remaining = Math.max(0, timeLimitRef.current - elapsedSeconds);
               
               setTimeRemaining(remaining);
               
@@ -451,6 +491,7 @@ export default function MultiplayerRace3D() {
     // Use seed for consistent random generation across all clients
     const randomValue = seed !== undefined ? seed : Math.random();
     const gapPosition = GROUND_LEVEL + 2 + randomValue * 10;
+    const currentGap = pipeGapRef.current || 6;
     
     // Calculate pipe width based on number of players - needs to encompass all birds
     const numPlayers = players.length || 1;
@@ -459,7 +500,7 @@ export default function MultiplayerRace3D() {
     const pipeWidth = Math.max(PIPE_WIDTH, totalBirdWidth + 8); // +8 for margin on both sides
     
     // Bottom pipe - using MeshBasicMaterial for performance
-    const bottomHeight = gapPosition - GROUND_LEVEL - PIPE_GAP / 2;
+    const bottomHeight = gapPosition - GROUND_LEVEL - currentGap / 2;
     const bottomGeometry = new THREE.BoxGeometry(pipeWidth, bottomHeight, pipeWidth);
     const pipeMaterial = new THREE.MeshBasicMaterial({ color: 0x228B22 }); // Changed to MeshBasicMaterial
     const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
@@ -468,7 +509,7 @@ export default function MultiplayerRace3D() {
     sceneRef.current.add(bottomPipe);
     
     // Top pipe
-    const topHeight = CEILING_LEVEL - gapPosition - PIPE_GAP / 2;
+    const topHeight = CEILING_LEVEL - gapPosition - currentGap / 2;
     const topGeometry = new THREE.BoxGeometry(pipeWidth, topHeight, pipeWidth);
     const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
     topPipe.position.set(playerXOffset, gapPosition + PIPE_GAP / 2 + topHeight / 2, zPosition); // Centered on player
@@ -480,12 +521,12 @@ export default function MultiplayerRace3D() {
     const capMaterial = new THREE.MeshBasicMaterial({ color: 0x006400 }); // Changed to MeshBasicMaterial
     
     const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
-    bottomCap.position.set(playerXOffset, gapPosition - PIPE_GAP / 2, zPosition); // Centered on player
+    bottomCap.position.set(playerXOffset, gapPosition - currentGap / 2, zPosition); // Centered on player
     bottomCap.visible = isVisible;
     sceneRef.current.add(bottomCap);
     
     const topCap = new THREE.Mesh(capGeometry, capMaterial);
-    topCap.position.set(playerXOffset, gapPosition + PIPE_GAP / 2, zPosition); // Centered on player
+    topCap.position.set(playerXOffset, gapPosition + currentGap / 2, zPosition); // Centered on player
     topCap.visible = isVisible;
     sceneRef.current.add(topCap);
     
@@ -655,7 +696,7 @@ export default function MultiplayerRace3D() {
             
             // Hand moved up = flap
             if (deltaY < -MOVEMENT_THRESHOLD) {
-              birdVelocityRef.current = FLAP_STRENGTH;
+              birdVelocityRef.current = flapStrengthRef.current;
               console.log('FLAP!');
             }
           }
@@ -665,13 +706,13 @@ export default function MultiplayerRace3D() {
       }
       
       // Bird physics - using timeScale for consistent movement
-      birdVelocityRef.current += GRAVITY * timeScale;
+      birdVelocityRef.current += gravityRef.current * timeScale;
       birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
       birdRef.current.position.y = birdYRef.current;
       birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
     } else if (gameOverRef.current) {
       // Death animation - make bird fall and fade
-      birdVelocityRef.current += GRAVITY * 1.5 * timeScale; // Fall faster when dead
+      birdVelocityRef.current += gravityRef.current * 1.5 * timeScale; // Fall faster when dead
       birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
       birdRef.current.position.y = birdYRef.current;
       birdRef.current.rotation.z += 0.05 * timeScale; // Spin while falling
@@ -803,7 +844,7 @@ export default function MultiplayerRace3D() {
       // Update pipes - using timeScale for consistent movement
       for (let i = pipesRef.current.length - 1; i >= 0; i--) {
         const pipe = pipesRef.current[i];
-        pipe.z += PIPE_SPEED * timeScale;
+        pipe.z += pipeSpeedRef.current * timeScale;
         
         // Update pipe positions - keep them centered on player's X position
         pipe.bottom.position.set(xOffset, pipe.bottom.position.y, pipe.z);
@@ -836,8 +877,8 @@ export default function MultiplayerRace3D() {
           const isInPipeXRange = Math.abs(birdX - pipeX) < pipe.width / 2 + BIRD_RADIUS;
           
           // Check if bird is outside the gap vertically (accounting for bird radius)
-          const isOutsideGap = birdY < pipe.gapY - PIPE_GAP / 2 + BIRD_RADIUS || 
-                               birdY > pipe.gapY + PIPE_GAP / 2 - BIRD_RADIUS;
+          const isOutsideGap = birdY < pipe.gapY - pipeGapRef.current / 2 + BIRD_RADIUS || 
+                               birdY > pipe.gapY + pipeGapRef.current / 2 - BIRD_RADIUS;
           
           if (isInPipeXRange && isOutsideGap) {
             gameOverRef.current = true;
@@ -910,7 +951,7 @@ export default function MultiplayerRace3D() {
       return;
     }
     setError('');
-    socketRef.current.emit('create-room', { playerName, timeLimit });
+    socketRef.current.emit('create-room', { playerName, difficulty });
   };
 
   const joinRoom = () => {
@@ -951,16 +992,15 @@ export default function MultiplayerRace3D() {
           />
           
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Time Limit</label>
+            <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
             <select
-              value={timeLimit}
-              onChange={(e) => setTimeLimit(Number(e.target.value))}
+              value={difficulty}
+              onChange={(e) => setDifficulty(e.target.value as Difficulty)}
               className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
             >
-              <option value={60}>1 Minute</option>
-              <option value={120}>2 Minutes</option>
-              <option value={180}>3 Minutes</option>
-              <option value={300}>5 Minutes</option>
+              <option value="easy">Easy (3 min)</option>
+              <option value="medium">Medium (2 min)</option>
+              <option value="hard">Hard (90 sec)</option>
             </select>
           </div>
           
