@@ -146,15 +146,13 @@ app.prepare().then(() => {
       });
     });
 
-    socket.on('generate-pipe', ({ roomCode, zPosition, gapY, width }) => {
+    socket.on('reveal-pipe', ({ roomCode, index }) => {
       const room = rooms.get(roomCode);
       if (!room) return;
       
-      // Broadcast pipe generation to all other players in room
-      socket.to(roomCode).emit('pipe-generated', { 
-        zPosition,
-        gapY,
-        width
+      // Broadcast pipe reveal to all other players in room
+      socket.to(roomCode).emit('reveal-pipe', { 
+        index
       });
     });
 

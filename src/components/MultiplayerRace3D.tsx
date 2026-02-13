@@ -70,6 +70,8 @@ export default function MultiplayerRace3D() {
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionUpdateRef = useRef<number>(0);
   const isRoomCreatorRef = useRef<boolean>(false);
+  const revealedPipeIndexRef = useRef<number>(0);
+  const gameStartTimeRef = useRef<number>(0);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -161,6 +163,7 @@ export default function MultiplayerRace3D() {
             
             // Start the game running
             isGameRunningRef.current = true;
+            gameStartTimeRef.current = performance.now();
             
             // Start timer
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -197,14 +200,16 @@ export default function MultiplayerRace3D() {
         const bird = createBird(0x00ffff); // Different color for opponents
         sceneRef.current.add(bird);
         
-        // Set initial horizontal position immediately
+        // Set initial horizontal and depth position immediately
         const currentPlayers = players.length > 0 ? players : [];
         const opponentIndex = currentPlayers.findIndex(p => p.id === playerId);
         if (opponentIndex !== -1) {
           const spacing = 6;
           const totalWidth = (currentPlayers.length - 1) * spacing;
           const xOffset = opponentIndex * spacing - totalWidth / 2;
+          const zOffset = opponentIndex * -3; // 3 units apart in Z
           bird.position.x = xOffset;
+          bird.position.z = zOffset;
         }
         
         opponent = { mesh: bird, y, targetY: y, isAlive };
@@ -219,48 +224,18 @@ export default function MultiplayerRace3D() {
       }
     });
 
-    newSocket.on('pipe-generated', ({ zPosition, gapY, width }) => {
-      // Received synchronized pipe from creator
-      if (!sceneRef.current) return;
+    newSocket.on('reveal-pipe', ({ index }) => {
+      // Synchronize pipe reveal across all clients
+      revealedPipeIndexRef.current = Math.max(revealedPipeIndexRef.current, index);
       
-      const pipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
-      
-      // Bottom pipe
-      const bottomHeight = gapY - GROUND_LEVEL - PIPE_GAP / 2;
-      const bottomGeometry = new THREE.BoxGeometry(width, bottomHeight, width);
-      const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
-      bottomPipe.position.set(0, GROUND_LEVEL + bottomHeight / 2, zPosition);
-      sceneRef.current.add(bottomPipe);
-      
-      // Top pipe
-      const topHeight = CEILING_LEVEL - gapY - PIPE_GAP / 2;
-      const topGeometry = new THREE.BoxGeometry(width, topHeight, width);
-      const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
-      topPipe.position.set(0, gapY + PIPE_GAP / 2 + topHeight / 2, zPosition);
-      sceneRef.current.add(topPipe);
-      
-      // Caps
-      const capGeometry = new THREE.BoxGeometry(width + 1, 0.5, width + 1);
-      const capMaterial = new THREE.MeshPhongMaterial({ color: 0x006400 });
-      
-      const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
-      bottomCap.position.set(0, gapY - PIPE_GAP / 2, zPosition);
-      sceneRef.current.add(bottomCap);
-      
-      const topCap = new THREE.Mesh(capGeometry, capMaterial);
-      topCap.position.set(0, gapY + PIPE_GAP / 2, zPosition);
-      sceneRef.current.add(topCap);
-      
-      pipesRef.current.push({
-        bottom: bottomPipe,
-        top: topPipe,
-        bottomCap,
-        topCap,
-        z: zPosition,
-        passed: false,
-        gapY,
-        width
-      });
+      // Reveal all pipes up to this index
+      for (let i = 0; i <= index && i < pipesRef.current.length; i++) {
+        const pipe = pipesRef.current[i];
+        pipe.bottom.visible = true;
+        pipe.top.visible = true;
+        pipe.bottomCap.visible = true;
+        pipe.topCap.visible = true;
+      }
     });
 
     newSocket.on('player-died', ({ playerId }) => {
@@ -399,7 +374,10 @@ export default function MultiplayerRace3D() {
 
     // Create player bird
     const bird = createBird(0xFFD700);
-    bird.position.set(0, 0, 0);
+    // Space out birds in Z direction
+    const playerIndex = players.findIndex(p => p.id === myPlayerId);
+    const birdZOffset = playerIndex * -3; // 3 units apart in Z
+    bird.position.set(0, 0, birdZOffset);
     scene.add(bird);
     birdRef.current = bird;
 
@@ -463,24 +441,16 @@ export default function MultiplayerRace3D() {
     return bird;
   };
 
-  const createObstacle = (zPosition: number) => {
+  const createObstacle = (zPosition: number, isVisible: boolean = false, seed?: number) => {
     if (!sceneRef.current) return;
     
-    const gapPosition = GROUND_LEVEL + 2 + Math.random() * 10;
+    // Use seed for consistent random generation across all clients
+    const randomValue = seed !== undefined ? seed : Math.random();
+    const gapPosition = GROUND_LEVEL + 2 + randomValue * 10;
     
     // Calculate pipe width based on number of players
     const numPlayers = players.length || 1;
     const pipeWidth = Math.max(PIPE_WIDTH, numPlayers * 3 + 3);
-    
-    // If this is the room creator, broadcast pipe data to sync with other players
-    if (isRoomCreatorRef.current && socketRef.current && roomCodeRef.current) {
-      socketRef.current.emit('generate-pipe', {
-        roomCode: roomCodeRef.current,
-        zPosition,
-        gapY: gapPosition,
-        width: pipeWidth
-      });
-    }
     
     // Bottom pipe
     const bottomHeight = gapPosition - GROUND_LEVEL - PIPE_GAP / 2;
@@ -488,6 +458,7 @@ export default function MultiplayerRace3D() {
     const pipeMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
     const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
     bottomPipe.position.set(0, GROUND_LEVEL + bottomHeight / 2, zPosition);
+    bottomPipe.visible = isVisible;
     sceneRef.current.add(bottomPipe);
     
     // Top pipe
@@ -495,6 +466,7 @@ export default function MultiplayerRace3D() {
     const topGeometry = new THREE.BoxGeometry(pipeWidth, topHeight, pipeWidth);
     const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
     topPipe.position.set(0, gapPosition + PIPE_GAP / 2 + topHeight / 2, zPosition);
+    topPipe.visible = isVisible;
     sceneRef.current.add(topPipe);
     
     // Caps
@@ -503,10 +475,12 @@ export default function MultiplayerRace3D() {
     
     const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
     bottomCap.position.set(0, gapPosition - PIPE_GAP / 2, zPosition);
+    bottomCap.visible = isVisible;
     sceneRef.current.add(bottomCap);
     
     const topCap = new THREE.Mesh(capGeometry, capMaterial);
     topCap.position.set(0, gapPosition + PIPE_GAP / 2, zPosition);
+    topCap.visible = isVisible;
     sceneRef.current.add(topCap);
     
     pipesRef.current.push({
@@ -588,6 +562,8 @@ export default function MultiplayerRace3D() {
     frameCountRef.current = 0;
     lastObstacleZRef.current = -25;
     isGameRunningRef.current = false;
+    revealedPipeIndexRef.current = -1;
+    gameStartTimeRef.current = 0;
     setMyScore(0);
     setIsDead(false);
     
@@ -604,11 +580,12 @@ export default function MultiplayerRace3D() {
       });
     }
     
-    // Create initial pipes - ONLY if room creator
-    if (isRoomCreatorRef.current) {
-      for (let i = 0; i < 5; i++) {
-        createObstacle(-25 - i * 25);
-      }
+    // Pre-create ALL 50 pipes, initially invisible
+    // Use deterministic seeds for consistent obstacle placement across all clients
+    for (let i = 0; i < 50; i++) {
+      // Use a deterministic seed based on index for consistent random values
+      const seed = (Math.sin(i * 12.9898) + 1) / 2; // Generates value between 0 and 1
+      createObstacle(-25 - i * 25, false, seed);
     }
     
     const gameLoop = () => {
@@ -714,10 +691,11 @@ export default function MultiplayerRace3D() {
     opponentBirdsRef.current.forEach((opponent, playerId) => {
       const opponentIndex = players.findIndex(p => p.id === playerId);
       const opponentXOffset = opponentIndex * spacing - totalWidth / 2;
+      const opponentZOffset = opponentIndex * -3; // Same Z spacing as player bird
       
       // Smooth interpolation for Y position (lerp with factor 0.3 for responsiveness)
       opponent.y += (opponent.targetY - opponent.y) * 0.3;
-      opponent.mesh.position.set(opponentXOffset, opponent.y, 0);
+      opponent.mesh.position.set(opponentXOffset, opponent.y, opponentZOffset);
     });
     
     // Camera follow - spectate last two alive players when dead
@@ -745,11 +723,13 @@ export default function MultiplayerRace3D() {
       if (count > 0) {
         const avgY = totalY / count;
         const avgX = totalX / count;
-        cameraRef.current.position.y += (avgY - cameraRef.current.position.y) * 0.05;
-        cameraRef.current.position.x += (avgX - cameraRef.current.position.x) * 0.05;
-        cameraRef.current.lookAt(avgX, avgY, -10);
+        if (cameraRef.current) {
+          cameraRef.current.position.y += (avgY - cameraRef.current.position.y) * 0.05;
+          cameraRef.current.position.x += (avgX - cameraRef.current.position.x) * 0.05;
+          cameraRef.current.lookAt(avgX, avgY, -10);
+        }
       }
-    } else if (!gameOverRef.current) {
+    } else if (!gameOverRef.current && cameraRef.current) {
       cameraRef.current.position.y += (birdYRef.current - cameraRef.current.position.y) * 0.08;
       cameraRef.current.position.x += (xOffset - cameraRef.current.position.x) * 0.08; // Follow player X position smoothly
       cameraRef.current.lookAt(xOffset, birdYRef.current, -10);
@@ -781,11 +761,27 @@ export default function MultiplayerRace3D() {
         }
       }
       
-      // Pipe generation (only when alive)
-      frameCountRef.current++;
-      if (!gameOverRef.current && frameCountRef.current % 100 === 0) {
-        lastObstacleZRef.current -= 25;
-        createObstacle(lastObstacleZRef.current);
+      // Pipe reveal logic - synchronized across all clients based on game time
+      if (isRoomCreatorRef.current && socketRef.current && roomCodeRef.current) {
+        const elapsedTime = (performance.now() - gameStartTimeRef.current) / 1000; // seconds
+        const pipesToReveal = Math.floor(elapsedTime / 0.67); // Reveal one pipe every 0.67 seconds (100 frames at ~60fps)
+        
+        if (pipesToReveal > revealedPipeIndexRef.current && pipesToReveal < 50) {
+          revealedPipeIndexRef.current = pipesToReveal;
+          socketRef.current.emit('reveal-pipe', {
+            roomCode: roomCodeRef.current,
+            index: pipesToReveal
+          });
+          
+          // Reveal locally for creator
+          const pipe = pipesRef.current[pipesToReveal];
+          if (pipe) {
+            pipe.bottom.visible = true;
+            pipe.top.visible = true;
+            pipe.bottomCap.visible = true;
+            pipe.topCap.visible = true;
+          }
+        }
       }
       
       // Update pipes
