@@ -340,10 +340,44 @@ export default function MultiplayerRace() {
           return;
         }
         
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Get video dimensions
+        const videoWidth = videoRef.current.videoWidth;
+        const videoHeight = videoRef.current.videoHeight;
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        
+        // Calculate aspect ratio fit
+        const videoAspect = videoWidth / videoHeight;
+        const canvasAspect = canvasWidth / canvasHeight;
+        
+        let drawWidth, drawHeight, offsetX, offsetY;
+        
+        if (videoAspect > canvasAspect) {
+          // Video is wider - fit to height
+          drawHeight = canvasHeight;
+          drawWidth = canvasHeight * videoAspect;
+          offsetX = (canvasWidth - drawWidth) / 2;
+          offsetY = 0;
+        } else {
+          // Video is taller - fit to width
+          drawWidth = canvasWidth;
+          drawHeight = canvasWidth / videoAspect;
+          offsetX = 0;
+          offsetY = (canvasHeight - drawHeight) / 2;
+        }
+        
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
         ctx.save();
         ctx.scale(-1, 1);
-        ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
+        ctx.drawImage(
+          videoRef.current,
+          -offsetX - drawWidth,
+          offsetY,
+          drawWidth,
+          drawHeight
+        );
         ctx.restore();
 
         // Update and draw particles
