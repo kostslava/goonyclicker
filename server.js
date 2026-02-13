@@ -98,6 +98,7 @@ app.prepare().then(() => {
       }
       
       room.gameStarted = true;
+      room.playersReady = new Set(); // Track ready players
       console.log(`Game starting in room ${roomCode} with ${room.players.length} players, time limit ${room.timeLimit}s`);
       io.to(roomCode).emit('game-start', { players: room.players, timeLimit: room.timeLimit });
     });
@@ -161,9 +162,30 @@ app.prepare().then(() => {
       
       // Reset game state but keep scores
       room.gameStarted = true;
+      room.playersReady = new Set(); // Reset ready tracking
       
       console.log(`Game restarting in room ${roomCode} with ${room.players.length} players`);
       io.to(roomCode).emit('game-restart', { players: room.players, timeLimit: room.timeLimit });
+    });
+
+    socket.on('player-ready', ({ roomCode }) => {
+      console.log(`Player ready: ${socket.id} in room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Add player to ready set
+      if (!room.playersReady) {
+        room.playersReady = new Set();
+      }
+      room.playersReady.add(socket.id);
+      
+      console.log(`Players ready: ${room.playersReady.size}/${room.players.length}`);
+      
+      // Check if all players are ready
+      if (room.playersReady.size === room.players.length) {
+        console.log(`All players ready in room ${roomCode}, starting countdown`);
+        io.to(roomCode).emit('all-players-ready');
+      }
     });
 
     socket.on('update-multiplier', ({ roomCode, multiplier }) => {

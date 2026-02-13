@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
-const MOVEMENT_THRESHOLD = 0.02;
+const MOVEMENT_THRESHOLD = 0.015;
 const DEFAULT_TIME_LIMIT = 120;
 const GRAVITY = -1.2;
-const FLAP_STRENGTH = 10;
+const FLAP_STRENGTH = 18;
 const PIPE_SPEED = 0.15;
 const PIPE_GAP = 5.5;
 const PIPE_WIDTH = 6;
@@ -124,6 +124,12 @@ export default function MultiplayerRace3D() {
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setIsDead(false);
       
+      // Initialize camera and wait for ready signal
+      setTimeout(initHandTrackingCallback, 100);
+    });
+
+    newSocket.on('all-players-ready', () => {
+      console.log('All players ready, starting countdown');
       // Start countdown
       setCountdown(3);
       const countdownInterval = setInterval(() => {
@@ -132,8 +138,8 @@ export default function MultiplayerRace3D() {
             clearInterval(countdownInterval);
             setCountdown(null);
             
-            // Start the actual game
-            setTimeout(initHandTrackingCallback, 100);
+            // Start the game running
+            isGameRunningRef.current = true;
             
             // Start timer
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -196,8 +202,15 @@ export default function MultiplayerRace3D() {
         const newAlive = new Set(prev);
         newAlive.delete(playerId);
         
+        // Check if all players are dead
+        if (newAlive.size === 0) {
+          // All players dead, restart after short delay
+          setTimeout(() => {
+            socketRef.current?.emit('restart-game', { roomCode: roomCodeRef.current });
+          }, 2000);
+        }
         // Check if only one player left
-        if (newAlive.size === 1) {
+        else if (newAlive.size === 1) {
           const winnerId = Array.from(newAlive)[0];
           const winnerPlayer = players.find(p => p.id === winnerId);
           if (winnerPlayer) {
@@ -261,37 +274,10 @@ export default function MultiplayerRace3D() {
         createObstacle(-25 - i * 25);
       }
       
-      // Start countdown
-      setCountdown(3);
-      const countdownInterval = setInterval(() => {
-        setCountdown(prev => {
-          if (prev === null || prev <= 1) {
-            clearInterval(countdownInterval);
-            setCountdown(null);
-            
-            // Start the game running
-            isGameRunningRef.current = true;
-            
-            // Start timer
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = setInterval(() => {
-              setTimeRemaining(prev => {
-                if (prev <= 1) {
-                  if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-                  setTimeout(() => {
-                    socketRef.current?.emit('game-over', { roomCode: roomCodeRef.current });
-                  }, 100);
-                  return 0;
-                }
-                return prev - 1;
-              });
-            }, 1000);
-            
-            return null;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      // Signal player is ready for restart
+      if (socketRef.current && roomCodeRef.current) {
+        socketRef.current.emit('player-ready', { roomCode: roomCodeRef.current });
+      }
     });
 
     newSocket.on('error', (msg) => {
@@ -485,6 +471,12 @@ export default function MultiplayerRace3D() {
       
       handLandmarkerRef.current = landmarker;
       setIsTracking(true);
+      
+      // Signal that this player's camera is ready
+      if (socketRef.current && roomCodeRef.current) {
+        socketRef.current.emit('player-ready', { roomCode: roomCodeRef.current });
+      }
+      
       startGame();
     } catch (err) {
       const error = err as { name?: string; message?: string };
@@ -542,9 +534,8 @@ export default function MultiplayerRace3D() {
     
     // Only process player physics and input if player is alive
     if (!gameOverRef.current) {
-      // Hand detection (reduced frequency for performance)
+      // Hand detection every frame for better responsiveness
       if (
-        frameCountRef.current % 3 === 0 && // Process every third frame
         videoRef.current &&
         handLandmarkerRef.current &&
         videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
@@ -562,14 +553,19 @@ export default function MultiplayerRace3D() {
             if (repStateRef.current === 'waiting' && deltaY < -MOVEMENT_THRESHOLD) {
               // Started moving up
               repStateRef.current = 'up';
+              console.log('UP detected');
             } else if (repStateRef.current === 'up' && deltaY > MOVEMENT_THRESHOLD) {
               // Completed rep: moved up then down
               repStateRef.current = 'waiting';
               birdVelocityRef.current = FLAP_STRENGTH;
+              console.log('FLAP!');
             }
           }
           
           lastHandYRef.current = handY;
+        } else {
+          // No hand detected, reset lastHandY to prevent false detections
+          lastHandYRef.current = null;
         }
       }
       
