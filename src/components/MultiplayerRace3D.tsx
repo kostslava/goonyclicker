@@ -73,6 +73,7 @@ export default function MultiplayerRace3D() {
   const revealedPipeIndexRef = useRef<number>(0);
   const gameStartTimeRef = useRef<number>(0);
   const sharedStartTimeRef = useRef<number>(0);
+  const lastFrameTimeRef = useRef<number>(0);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -359,7 +360,7 @@ export default function MultiplayerRace3D() {
 
     const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 100); // Reduced far plane from 1000 to 100
     camera.position.set(0, 2, 10);
-    camera.lookAt(0, 0, -10);
+    camera.lookAt(0, 0, 0); // Look at bird starting position
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ 
@@ -569,6 +570,7 @@ export default function MultiplayerRace3D() {
     isGameRunningRef.current = false;
     revealedPipeIndexRef.current = -1;
     gameStartTimeRef.current = 0;
+    lastFrameTimeRef.current = 0;
     setMyScore(0);
     setIsDead(false);
     
@@ -599,10 +601,17 @@ export default function MultiplayerRace3D() {
       createObstacle(-25 - i * 25, false, seed, playerXOffset);
     }
     
-    const gameLoop = () => {
+    const gameLoop = (currentTime: number) => {
+      // Calculate delta time for consistent physics across different frame rates
+      if (lastFrameTimeRef.current === 0) {
+        lastFrameTimeRef.current = currentTime;
+      }
+      const deltaTime = Math.min((currentTime - lastFrameTimeRef.current) / 1000, 0.1); // Cap at 0.1s to prevent huge jumps
+      lastFrameTimeRef.current = currentTime;
+      
       // Only update game physics when game is actually running (after countdown)
       if (isGameRunningRef.current) {
-        updateGame();
+        updateGame(deltaTime);
         // Draw webcam less frequently for performance (every 3rd frame)
         if (frameCountRef.current % 3 === 0) {
           drawWebcam();
@@ -618,11 +627,14 @@ export default function MultiplayerRace3D() {
       animationFrameRef.current = requestAnimationFrame(gameLoop);
     };
     
-    gameLoop();
+    gameLoop(performance.now());
   };
 
-  const updateGame = () => {
+  const updateGame = (deltaTime: number) => {
     if (!birdRef.current || !sceneRef.current || !cameraRef.current) return;
+    
+    // Target 60 FPS as baseline (deltaTime will be ~0.0167 at 60fps)
+    const timeScale = deltaTime * 60; // Normalize to 60 FPS
     
     // Only process player physics and input if player is alive AND game is running
     if (!gameOverRef.current && isGameRunningRef.current) {
@@ -665,17 +677,17 @@ export default function MultiplayerRace3D() {
         }
       }
       
-      // Bird physics
-      birdVelocityRef.current += GRAVITY;
-      birdYRef.current += birdVelocityRef.current * 0.01;
+      // Bird physics - using timeScale for consistent movement
+      birdVelocityRef.current += GRAVITY * timeScale;
+      birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
       birdRef.current.position.y = birdYRef.current;
       birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
     } else if (gameOverRef.current) {
       // Death animation - make bird fall and fade
-      birdVelocityRef.current += GRAVITY * 1.5; // Fall faster when dead
-      birdYRef.current += birdVelocityRef.current * 0.01;
+      birdVelocityRef.current += GRAVITY * 1.5 * timeScale; // Fall faster when dead
+      birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
       birdRef.current.position.y = birdYRef.current;
-      birdRef.current.rotation.z += 0.05; // Spin while falling
+      birdRef.current.rotation.z += 0.05 * timeScale; // Spin while falling
       
       // Fade out the bird
       birdRef.current.traverse((child) => {
@@ -714,9 +726,9 @@ export default function MultiplayerRace3D() {
       opponent.mesh.position.set(opponentXOffset, opponent.y, 0); // All birds at same depth
     });
     
-    // Camera follow - spectate last two alive players when dead
-    if (gameOverRef.current && alivePlayers.size >= 2) {
-      // Spectate the last two alive players
+    // Camera follow - always track something
+    if (gameOverRef.current && alivePlayers.size >= 1) {
+      // Spectate alive players when dead
       spectatingRef.current = true;
       
       // Get alive player IDs
@@ -739,17 +751,18 @@ export default function MultiplayerRace3D() {
       if (count > 0) {
         const avgY = totalY / count;
         const avgX = totalX / count;
-        if (cameraRef.current) {
-          cameraRef.current.position.y += (avgY - cameraRef.current.position.y) * 0.05;
-          cameraRef.current.position.x += (avgX - cameraRef.current.position.x) * 0.05;
-          cameraRef.current.lookAt(avgX, avgY, -10);
-        }
+        const lerpFactor = 0.05 * timeScale;
+        cameraRef.current.position.y += (avgY - cameraRef.current.position.y) * lerpFactor;
+        cameraRef.current.position.x += (avgX - cameraRef.current.position.x) * lerpFactor;
+        cameraRef.current.lookAt(avgX, avgY, 0);
       }
-    } else if (!gameOverRef.current && cameraRef.current) {
-      cameraRef.current.position.y += (birdYRef.current - cameraRef.current.position.y) * 0.08;
-      cameraRef.current.position.x += (xOffset - cameraRef.current.position.x) * 0.08; // Follow player X position smoothly
-      cameraRef.current.lookAt(xOffset, birdYRef.current, -10);
-      spectatingRef.current = false;
+    } else {
+      // Follow player (alive or dead but no one else alive)
+      const lerpFactor = 0.08 * timeScale;
+      cameraRef.current.position.y += (birdYRef.current - cameraRef.current.position.y) * lerpFactor;
+      cameraRef.current.position.x += (xOffset - cameraRef.current.position.x) * lerpFactor;
+      cameraRef.current.lookAt(xOffset, birdYRef.current, 0);
+      spectatingRef.current = gameOverRef.current && alivePlayers.size > 0;
     }
     
     // Broadcast position at max 25ms intervals (40 FPS) for smooth real-time sync
@@ -800,10 +813,10 @@ export default function MultiplayerRace3D() {
         }
       }
       
-      // Update pipes
+      // Update pipes - using timeScale for consistent movement
       for (let i = pipesRef.current.length - 1; i >= 0; i--) {
         const pipe = pipesRef.current[i];
-        pipe.z += PIPE_SPEED;
+        pipe.z += PIPE_SPEED * timeScale;
         
         // Update pipe positions - keep them centered on player's X position
         pipe.bottom.position.set(xOffset, pipe.bottom.position.y, pipe.z);
