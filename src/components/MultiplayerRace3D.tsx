@@ -399,7 +399,7 @@ export default function MultiplayerRace3D() {
     scene.background = new THREE.Color(0x87CEEB);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 100); // Reduced far plane from 1000 to 100
+    const camera = new THREE.PerspectiveCamera(75, 640 / 480, 0.1, 100); // Reduced far plane from 1000 to 100
     camera.position.set(0, 2, 10);
     camera.lookAt(0, 0, 0); // Look at bird starting position
     cameraRef.current = camera;
@@ -409,7 +409,7 @@ export default function MultiplayerRace3D() {
       powerPreference: 'low-power', // Prefer integrated GPU for better battery/performance
       precision: 'lowp' // Low precision for better performance
     });
-    renderer.setSize(800, 600);
+    renderer.setSize(640, 480);
     renderer.setPixelRatio(1); // Fixed at 1 for performance
     const container = containerRef.current;
     container.appendChild(renderer.domElement);
@@ -548,8 +548,8 @@ export default function MultiplayerRace3D() {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: 'user', 
-          width: { ideal: 480 }, 
-          height: { ideal: 480 },
+          width: { ideal: 240 }, 
+          height: { ideal: 240 },
           aspectRatio: { ideal: 1.0 } // Request square aspect ratio for MediaPipe
         }
       });
@@ -854,7 +854,8 @@ export default function MultiplayerRace3D() {
       }
       
       // Calculate deterministic elapsed time from authoritative server-synchronized game start
-      const elapsedGameTimeMs = Date.now() - gameStartTimeRef.current;
+      // Guard against uninitialized game start time (prevents pipes jumping on second tower)
+      const elapsedGameTimeMs = gameStartTimeRef.current > 0 ? Date.now() - gameStartTimeRef.current : 0;
       const elapsedGameTimeSec = elapsedGameTimeMs / 1000;
       
       // Pipe reveal logic - synchronized across all clients based on game time
@@ -1167,7 +1168,7 @@ export default function MultiplayerRace3D() {
 
   return (
     <div className="relative min-h-screen w-full bg-black flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '480px', height: '480px' }} />
+      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '240px', height: '240px' }} />
       
       {/* Game Canvas */}
       <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
