@@ -908,10 +908,18 @@ export default function MultiplayerRace3D() {
     const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for performance
     if (!ctx) return;
     
-    // Draw mirrored video
+    // Clear canvas first
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Get actual video dimensions
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+    
+    // Draw mirrored video - stretch to fill canvas
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.translate(-canvas.width, 0);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     ctx.restore();
     
     // Draw hand landmarks
@@ -925,15 +933,15 @@ export default function MultiplayerRace3D() {
         ctx.strokeStyle = '#00f5ff';
         ctx.lineWidth = 2;
         
+        // landmarks are normalized 0-1 coordinates
+        // Scale them to canvas dimensions (which may differ from video dimensions)
+        // and mirror X to match the mirrored video display
         hand.forEach((landmark) => {
+          const x = canvas.width - (landmark.x * canvas.width);
+          const y = landmark.y * canvas.height;
+          
           ctx.beginPath();
-          ctx.arc(
-            canvas.width - landmark.x * canvas.width,
-            landmark.y * canvas.height,
-            4,
-            0,
-            2 * Math.PI
-          );
+          ctx.arc(x, y, 5, 0, 2 * Math.PI);
           ctx.fill();
         });
       }
