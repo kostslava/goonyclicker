@@ -1076,7 +1076,7 @@ export default function MultiplayerRace3D() {
       {/* Webcam Corner View */}
       <div className="absolute top-4 right-4 z-50">
         <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)' }}>
-          <canvas ref={webcamCanvasRef} width={160} height={120} />
+          <canvas ref={webcamCanvasRef} width={320} height={240} />
         </div>
         <p className="text-center text-white mt-2 text-sm font-bold">Your Camera</p>
       </div>
