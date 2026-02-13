@@ -45,6 +45,15 @@ interface GameState {
   gameOver: boolean;
 }
 
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  size: number;
+}
+
 const UPGRADES: Upgrade[] = [
   { id: 'lebron', name: '👑 Lebron Poster', description: '+1 score multiplier', cost: 10, multiplier: 1, image: 'https://a.espncdn.com/i/headshots/nba/players/full/1966.png' },
   { id: 'lotion', name: '🧴 Premium Lotion', description: '+2 score multiplier', cost: 50, multiplier: 2 },
