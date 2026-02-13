@@ -131,6 +131,11 @@ app.prepare().then(() => {
       }
     });
 
+    socket.on('bird-flap', ({ roomCode }) => {
+      console.log(`Bird flap from ${socket.id} in room ${roomCode}`);
+      socket.to(roomCode).emit('opponent-flap');
+    });
+
     // WebRTC signaling
     socket.on('webrtc-offer', ({ offer, roomCode }) => {
       console.log(`WebRTC offer from ${socket.id} in room ${roomCode}`);

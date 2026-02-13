@@ -24,21 +24,33 @@ interface Upgrade {
   image?: string;
 }
 
-interface Particle {
+interface Bird {
   x: number;
   y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  size: number;
+  velocity: number;
+  rotation: number;
+}
+
+interface Pipe {
+  x: number;
+  topHeight: number;
+  bottomY: number;
+  passed: boolean;
+}
+
+interface GameState {
+  bird: Bird;
+  pipes: Pipe[];
+  score: number;
+  gameOver: boolean;
 }
 
 const UPGRADES: Upgrade[] = [
-  { id: 'lebron', name: '👑 Lebron Poster', description: '+1 goon per stroke', cost: 10, multiplier: 1, image: 'https://a.espncdn.com/i/headshots/nba/players/full/1966.png' },
-  { id: 'lotion', name: '🧴 Premium Lotion', description: '+2 goons per stroke', cost: 50, multiplier: 2 },
-  { id: 'vr', name: '🥽 VR Headset', description: '+5 goons per stroke', cost: 200, multiplier: 5 },
-  { id: 'ai', name: '🤖 AI Girlfriend', description: '+10 goons per stroke', cost: 500, multiplier: 10 },
-  { id: 'lab', name: '🧪 Gene Therapy', description: '+25 goons per stroke', cost: 2000, multiplier: 25 },
+  { id: 'lebron', name: '👑 Lebron Poster', description: '+1 score multiplier', cost: 10, multiplier: 1, image: 'https://a.espncdn.com/i/headshots/nba/players/full/1966.png' },
+  { id: 'lotion', name: '🧴 Premium Lotion', description: '+2 score multiplier', cost: 50, multiplier: 2 },
+  { id: 'vr', name: '🥽 VR Headset', description: '+5 score multiplier', cost: 200, multiplier: 5 },
+  { id: 'ai', name: '🤖 AI Girlfriend', description: '+10 score multiplier', cost: 500, multiplier: 10 },
+  { id: 'lab', name: '🧪 Gene Therapy', description: '+25 score multiplier', cost: 2000, multiplier: 25 },
 ];
 
 export default function MultiplayerRace() {
@@ -64,6 +76,21 @@ export default function MultiplayerRace() {
   const [streak, setStreak] = useState(0);
   const [comboMultiplier, setComboMultiplier] = useState(1);
   const [opponentStream, setOpponentStream] = useState<MediaStream | null>(null);
+  
+  // Flappy Bird game state
+  const [myGameState, setMyGameState] = useState<GameState>({
+    bird: { x: 100, y: 300, velocity: 0, rotation: 0 },
+    pipes: [],
+    score: 0,
+    gameOver: false
+  });
+  const [opponentGameState, setOpponentGameState] = useState<GameState>({
+    bird: { x: 100, y: 300, velocity: 0, rotation: 0 },
+    pipes: [],
+    score: 0,
+    gameOver: false
+  });
+  const [showFace, setShowFace] = useState(false);
   
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -534,115 +561,155 @@ export default function MultiplayerRace() {
           const wrist = hand[0];
           const handY = wrist.y;
 
-          // Draw hand landmarks
-          ctx.fillStyle = '#00f5ff';
-          ctx.strokeStyle = '#00f5ff';
-          ctx.lineWidth = 2;
-          
-          for (let i = 0; i < hand.length; i++) {
-            const landmark = hand[i];
-            ctx.beginPath();
-            ctx.arc(
-              canvas.width - landmark.x * canvas.width,
-              landmark.y * canvas.height,
-              5,
-              0,
-              2 * Math.PI
-            );
-            ctx.fill();
+          // Draw hand landmarks (only when showing face)
+          if (showFace) {
+            ctx.fillStyle = '#00f5ff';
+            ctx.strokeStyle = '#00f5ff';
+            ctx.lineWidth = 2;
+            
+            for (let i = 0; i < hand.length; i++) {
+              const landmark = hand[i];
+              ctx.beginPath();
+              ctx.arc(
+                canvas.width - landmark.x * canvas.width,
+                landmark.y * canvas.height,
+                5,
+                0,
+                2 * Math.PI
+              );
+              ctx.fill();
+            }
           }
 
-          // Rep counting logic
+          // Flappy Bird control logic
           if (lastHandYRef.current !== null) {
             const deltaY = handY - lastHandYRef.current;
             
             if (deltaY < -MOVEMENT_THRESHOLD) {
-              if (stateRef.current === 'idle' || stateRef.current === 'moving_down') {
-                stateRef.current = 'moving_up';
-                console.log('State: moving_up');
-              }
-            } else if (deltaY > MOVEMENT_THRESHOLD) {
-              if (stateRef.current === 'moving_up') {
-                // Calculate speed (time since last stroke)
-                const now = performance.now();
-                const timeSinceLastStroke = (now - lastStrokeTimeRef.current) / 1000;
-                const speed = timeSinceLastStroke > 0 ? Math.min(3, 1 / timeSinceLastStroke) : 1;
-                
-                // Streak system - fast strokes build combo
-                let newStreak = streak;
-                let newCombo = comboMultiplier;
-                if (timeSinceLastStroke < 0.8) {
-                  newStreak++;
-                  newCombo = Math.min(5, 1 + Math.floor(newStreak / 3) * 0.5);
-                  setStreak(newStreak);
-                  setComboMultiplier(newCombo);
-                  
-                  // Reset streak timer
-                  if (streakTimerRef.current) clearTimeout(streakTimerRef.current);
-                  streakTimerRef.current = setTimeout(() => {
-                    setStreak(0);
-                    setComboMultiplier(1);
-                  }, 2000);
-                } else {
-                  newStreak = 0;
-                  newCombo = 1;
-                  setStreak(0);
-                  setComboMultiplier(1);
-                }
-                
-                lastStrokeTimeRef.current = now;
-
-                // Play sound (pitch increases with combo)
-                playRepSound(newCombo);
-
-                setLocalScore((prevScore) => {
-                  const newScore = prevScore + 1;
-                  console.log('REP COUNTED! New score:', newScore, 'Combo:', newCombo);
-                  
-                  if (socketRef.current && roomCodeRef.current) {
-                    console.log('Emitting score update:', { roomCode: roomCodeRef.current, score: newScore });
-                    socketRef.current.emit('update-score', { roomCode: roomCodeRef.current, score: newScore });
-                  } else {
-                    console.error('Cannot emit score - socket:', !!socketRef.current, 'roomCode:', roomCodeRef.current);
-                  }
-                  
-                  return newScore;
+              if (myGameState.gameOver) {
+                // Restart game
+                setMyGameState({
+                  bird: { x: 100, y: 300, velocity: 0, rotation: 0 },
+                  pipes: [],
+                  score: 0,
+                  gameOver: false
                 });
-
-                setCurrency((prev) => prev + multiplier * newCombo);
-
-                // Spawn particles based on multiplier, speed, and combo
-                const particleCount = Math.floor(multiplier * 3 + speed * 5 + newCombo * 5);
-                const handX = canvas.width - wrist.x * canvas.width;
-                const handYPos = wrist.y * canvas.height;
-                spawnParticles(handX, handYPos, particleCount, speed);
+                setShowFace(false);
+              } else {
+                // Hand moved up - flap the bird
+                setMyGameState(prev => ({
+                  ...prev,
+                  bird: {
+                    ...prev.bird,
+                    velocity: -8, // Jump force
+                    rotation: -0.3 // Slight upward rotation
+                  }
+                }));
                 
-                stateRef.current = 'moving_down';
-                
-                // Visual feedback with combo
-                ctx.fillStyle = newCombo > 1 ? '#ffff00' : '#00ff00';
-                ctx.font = 'bold 40px Arial';
-                const text = newCombo > 1 ? `x${newCombo}!` : `+${multiplier}!`;
-                ctx.fillText(text, canvas.width / 2 - 40, canvas.height / 2);
-              } else if (stateRef.current === 'idle') {
-                stateRef.current = 'moving_down';
-                console.log('State: moving_down (from idle)');
+                // Emit flap to opponent
+                if (socketRef.current && roomCodeRef.current) {
+                  socketRef.current.emit('bird-flap', { roomCode: roomCodeRef.current });
+                }
               }
             }
           }
           
           lastHandYRef.current = handY;
+        }
 
-          // Draw state indicator
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 16px Arial';
-          ctx.fillText(`State: ${stateRef.current}`, 10, 30);
-          ctx.fillText(`Score: ${localScore}`, 10, 55);
-        } else {
-          // No hand detected
-          ctx.fillStyle = '#ff0000';
-          ctx.font = 'bold 20px Arial';
-          ctx.fillText('NO HAND DETECTED', 10, 30);
+        // Update Flappy Bird physics
+        setMyGameState(prev => {
+          if (prev.gameOver) return prev;
+          
+          const newBird = { ...prev.bird };
+          const newPipes = [...prev.pipes];
+          let newScore = prev.score;
+          
+          // Apply gravity
+          newBird.velocity += 0.4;
+          newBird.y += newBird.velocity;
+          
+          // Update rotation based on velocity
+          newBird.rotation = Math.max(-0.5, Math.min(0.8, newBird.velocity * 0.1));
+          
+          // Update pipes
+          // Move existing pipes
+          for (let i = newPipes.length - 1; i >= 0; i--) {
+            newPipes[i].x -= 3;
+            
+            // Check if bird passed pipe
+            if (!newPipes[i].passed && newBird.x > newPipes[i].x + 50) {
+              newPipes[i].passed = true;
+              newScore += multiplier; // Apply multiplier to score
+              
+              // Earn currency for passing pipes
+              setCurrency(prev => prev + multiplier);
+              
+              // Emit score update
+              if (socketRef.current && roomCodeRef.current) {
+                socketRef.current.emit('update-score', { roomCode: roomCodeRef.current, score: newScore });
+              }
+            }
+            
+            // Remove pipes that are off screen
+            if (newPipes[i].x < -100) {
+              newPipes.splice(i, 1);
+            }
+          }
+          
+          // Add new pipes
+          if (newPipes.length === 0 || newPipes[newPipes.length - 1].x < canvas.width - 200) {
+            const pipeGap = 150;
+            const topHeight = Math.random() * (canvas.height - pipeGap - 100) + 50;
+            newPipes.push({
+              x: canvas.width,
+              topHeight,
+              bottomY: topHeight + pipeGap,
+              passed: false
+            });
+          }
+          
+          // Check collisions
+          let gameOver = false;
+          
+          // Ground and ceiling collision
+          if (newBird.y > canvas.height - 50 || newBird.y < 0) {
+            gameOver = true;
+          }
+          
+          // Pipe collision
+          for (const pipe of newPipes) {
+            if (newBird.x + 20 > pipe.x && newBird.x - 20 < pipe.x + 50) {
+              if (newBird.y - 15 < pipe.topHeight || newBird.y + 15 > pipe.bottomY) {
+                gameOver = true;
+                break;
+              }
+            }
+          }
+          
+          if (gameOver) {
+            // Show face when game over (low score)
+            setShowFace(true);
+          }
+          
+          return {
+            bird: newBird,
+            pipes: newPipes,
+            score: newScore,
+            gameOver
+          };
+        });
+
+        // Draw Flappy Bird game
+        drawFlappyBird(ctx, myGameState, opponentGameState, canvas.width, canvas.height);
+        
+        // Show face overlay when score is low
+        if (showFace && !myGameState.gameOver) {
+          // Draw semi-transparent face overlay
+          ctx.save();
+          ctx.globalAlpha = 0.7;
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
         }
       } catch (err) {
         console.error('Detection error:', err);
@@ -661,14 +728,131 @@ export default function MultiplayerRace() {
     };
   };
 
-  const createRoom = () => {
-    if (!playerName.trim()) {
-      setError('Please enter your name');
-      return;
+  // Update opponent bird physics
+  useEffect(() => {
+    const updateOpponent = () => {
+      setOpponentGameState(prev => {
+        if (prev.gameOver) return prev;
+        
+        const newBird = { ...prev.bird };
+        
+        // Apply gravity
+        newBird.velocity += 0.4;
+        newBird.y += newBird.velocity;
+        
+        // Update rotation
+        newBird.rotation = Math.max(-0.5, Math.min(0.8, newBird.velocity * 0.1));
+        
+        // Simple bounds check for opponent (just ground/ceiling)
+        const canvasHeight = 600; // Approximate canvas height
+        let gameOver = newBird.y > canvasHeight - 50 || newBird.y < 0;
+        
+        return {
+          ...prev,
+          bird: newBird,
+          gameOver
+        };
+      });
+    };
+    
+    const interval = setInterval(updateOpponent, 16); // ~60fps
+    return () => clearInterval(interval);
+  }, []);
+
+  const drawFlappyBird = (ctx: CanvasRenderingContext2D, myGame: GameState, opponentGame: GameState, width: number, height: number) => {
+    // Clear canvas with sky gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, '#4a90e2');
+    gradient.addColorStop(1, '#87CEEB');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    
+    // Draw pipes
+    ctx.fillStyle = '#90EE90';
+    ctx.strokeStyle = '#228B22';
+    ctx.lineWidth = 2;
+    
+    [...myGame.pipes, ...opponentGame.pipes.map(p => ({ ...p, x: p.x + width * 0.3 }))].forEach(pipe => {
+      // Top pipe
+      ctx.fillRect(pipe.x, 0, 50, pipe.topHeight);
+      ctx.strokeRect(pipe.x, 0, 50, pipe.topHeight);
+      
+      // Bottom pipe
+      ctx.fillRect(pipe.x, pipe.bottomY, 50, height - pipe.bottomY);
+      ctx.strokeRect(pipe.x, pipe.bottomY, 50, height - pipe.bottomY);
+    });
+    
+    // Draw birds
+    // My bird (main game)
+    drawBird(ctx, myGame.bird, '#FFD700');
+    
+    // Opponent bird (smaller in corner)
+    ctx.save();
+    ctx.translate(width * 0.7, height * 0.2);
+    ctx.scale(0.3, 0.3);
+    drawBird(ctx, opponentGame.bird, '#FF6B6B');
+    ctx.restore();
+    
+    // Draw scores
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 3;
+    ctx.font = 'bold 24px Arial';
+    ctx.strokeText(`You: ${myGame.score}`, 20, 40);
+    ctx.fillText(`You: ${myGame.score}`, 20, 40);
+    
+    ctx.font = 'bold 16px Arial';
+    ctx.strokeText(`Opponent: ${opponentGame.score}`, width * 0.7 + 10, height * 0.15);
+    ctx.fillText(`Opponent: ${opponentGame.score}`, width * 0.7 + 10, height * 0.15);
+    
+    // Game over message
+    if (myGame.gameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, width, height);
+      
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('GAME OVER', width / 2, height / 2 - 50);
+      ctx.font = 'bold 24px Arial';
+      ctx.fillText(`Final Score: ${myGame.score}`, width / 2, height / 2);
+      ctx.fillText('Move hand up to restart', width / 2, height / 2 + 50);
+      ctx.textAlign = 'left';
     }
-    console.log('Creating room as:', playerName, 'Time limit:', timeLimit);
-    setError(''); // Clear previous errors
-    socket?.emit('create-room', { playerName, timeLimit });
+  };
+
+  const drawBird = (ctx: CanvasRenderingContext2D, bird: Bird, color: string) => {
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.rotation);
+    
+    // Bird body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Bird eye
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(5, -5, 3, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(6, -5, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Bird beak
+    ctx.fillStyle = '#FFA500';
+    ctx.beginPath();
+    ctx.moveTo(15, 0);
+    ctx.lineTo(25, -2);
+    ctx.lineTo(25, 2);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.restore();
   };
 
   const joinRoom = () => {
@@ -834,38 +1018,25 @@ export default function MultiplayerRace() {
         <div className="bg-black bg-opacity-70 p-4 rounded-lg border-2 border-cyan-500 neon-border">
           <p className="text-2xl font-bold text-white">YOU</p>
           <p className="text-4xl font-bold text-cyan-400">💦 {currency}</p>
-          <p className="text-xl text-pink-400">x{multiplier} per stroke</p>
-          <p className="text-2xl text-white">Score: {localScore}</p>
-          {comboMultiplier > 1 && (
-            <p className="text-3xl font-bold text-yellow-400 animate-pulse">
-              🔥 x{comboMultiplier} COMBO!
-            </p>
+          <p className="text-xl text-pink-400">x{multiplier} multiplier</p>
+          <p className="text-2xl text-white">Bird Score: {myGameState.score}</p>
+          {myGameState.gameOver && (
+            <p className="text-xl text-red-400">GAME OVER</p>
           )}
         </div>
       </div>
       
-      {/* Opponent Video Feed - Top Right */}
+      {/* Opponent Stats - Top Right */}
       <div className="absolute top-4 right-4 z-40">
-        <div className="bg-black bg-opacity-70 p-2 rounded-lg border-2 border-pink-500 neon-border">
+        <div className="bg-black bg-opacity-70 p-4 rounded-lg border-2 border-pink-500 neon-border">
           <p className="text-xl font-bold text-white mb-1 text-center">
             {players.find(p => p.id !== myPlayerId)?.name || 'OPPONENT'}
           </p>
-          <div className="relative w-48 h-36 bg-gray-900 rounded-lg overflow-hidden">
-            <video
-              ref={opponentVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover transform -scale-x-100"
-            />
-            {!opponentStream && (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-                <p className="text-sm">Connecting...</p>
-              </div>
-            )}
-          </div>
-          <p className="text-xl text-white mt-1">Score: {players.find(p => p.id !== myPlayerId)?.score || 0}</p>
-          <p className="text-sm text-pink-400">x{players.find(p => p.id !== myPlayerId)?.multiplier || 1} per stroke</p>
+          <p className="text-xl text-white">Bird Score: {opponentGameState.score}</p>
+          <p className="text-sm text-pink-400">Multiplier: x{players.find(p => p.id !== myPlayerId)?.multiplier || 1}</p>
+          {opponentGameState.gameOver && (
+            <p className="text-sm text-red-400">GAME OVER</p>
+          )}
         </div>
       </div>
       
