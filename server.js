@@ -145,6 +145,27 @@ app.prepare().then(() => {
       });
     });
 
+    socket.on('player-died', ({ roomCode }) => {
+      console.log(`Player died: ${socket.id} in room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Broadcast player death to all players in room
+      io.to(roomCode).emit('player-died', { playerId: socket.id });
+    });
+
+    socket.on('restart-game', ({ roomCode }) => {
+      console.log(`Game restart requested for room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Reset game state but keep scores
+      room.gameStarted = true;
+      
+      console.log(`Game restarting in room ${roomCode} with ${room.players.length} players`);
+      io.to(roomCode).emit('game-restart', { players: room.players, timeLimit: room.timeLimit });
+    });
+
     socket.on('update-multiplier', ({ roomCode, multiplier }) => {
       console.log(`Multiplier update from ${socket.id} in room ${roomCode}: ${multiplier}`);
       const room = rooms.get(roomCode);
