@@ -84,6 +84,7 @@ export default function MultiplayerRace3D() {
     detectForVideo: (video: HTMLVideoElement, timestamp: number) => { landmarks?: unknown[][] };
   } | null>(null);
   const lastHandYRef = useRef<number | null>(null);
+  const detectionResultsRef = useRef<{ landmarks?: Array<Array<{ x: number; y: number; z: number }>> } | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const roomCodeRef = useRef<string>('');
@@ -657,6 +658,24 @@ export default function MultiplayerRace3D() {
       const deltaTime = Math.min((currentTime - lastFrameTimeRef.current) / 1000, 0.1); // Cap at 0.1s to prevent huge jumps
       lastFrameTimeRef.current = currentTime;
       
+      // Run hand detection ONCE per frame and cache results
+      // (MediaPipe requires monotonically increasing timestamps - calling twice per frame causes issues)
+      if (
+        videoRef.current &&
+        handLandmarkerRef.current &&
+        videoRef.current.readyState >= videoRef.current.HAVE_ENOUGH_DATA
+      ) {
+        try {
+          detectionResultsRef.current = handLandmarkerRef.current.detectForVideo(
+            videoRef.current, currentTime
+          ) as { landmarks?: Array<Array<{ x: number; y: number; z: number }>> };
+        } catch {
+          detectionResultsRef.current = null;
+        }
+      } else {
+        detectionResultsRef.current = null;
+      }
+      
       // Only update game physics when game is actually running (after countdown)
       if (isGameRunningRef.current) {
         updateGame(deltaTime);
@@ -685,31 +704,24 @@ export default function MultiplayerRace3D() {
     
     // Only process player physics and input if player is alive AND game is running
     if (!gameOverRef.current && isGameRunningRef.current) {
-      // Hand detection - run every frame for responsiveness
-      if (
-        videoRef.current &&
-        handLandmarkerRef.current &&
-        videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
-      ) {
-        const results = handLandmarkerRef.current.detectForVideo(videoRef.current, performance.now());
+      // Use cached hand detection results (detection runs once per frame in game loop)
+      const results = detectionResultsRef.current;
+      if (results?.landmarks && results.landmarks.length > 0) {
+        const hand = results.landmarks[0];
+        const wrist = hand[0];
+        const handY = wrist.y;
         
-        if (results?.landmarks && results.landmarks.length > 0) {
-          const hand = results.landmarks[0] as Array<{ x: number; y: number; z: number }>;
-          const wrist = hand[0];
-          const handY = wrist.y;
+        if (lastHandYRef.current !== null) {
+          const deltaY = handY - lastHandYRef.current;
           
-          if (lastHandYRef.current !== null) {
-            const deltaY = handY - lastHandYRef.current;
-            
-            // Hand moved up = flap
-            if (deltaY < -MOVEMENT_THRESHOLD) {
-              birdVelocityRef.current = flapStrengthRef.current;
-              console.log('FLAP!');
-            }
+          // Hand moved up = flap
+          if (deltaY < -MOVEMENT_THRESHOLD) {
+            birdVelocityRef.current = flapStrengthRef.current;
+            console.log('FLAP!');
           }
-          
-          lastHandYRef.current = handY;
         }
+        
+        lastHandYRef.current = handY;
       }
       
       // Bird physics - using timeScale for consistent movement
@@ -916,10 +928,14 @@ export default function MultiplayerRace3D() {
     const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for performance
     if (!ctx) return;
     
-    // Ensure canvas matches video dimensions
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return; // Video dimensions not yet available
+    
+    // Ensure canvas buffer matches video dimensions exactly
+    if (canvas.width !== vw || canvas.height !== vh) {
+      canvas.width = vw;
+      canvas.height = vh;
     }
     
     // Clear canvas
@@ -931,28 +947,26 @@ export default function MultiplayerRace3D() {
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
     
-    // Draw hand landmarks
-    if (handLandmarkerRef.current && video.readyState === video.HAVE_ENOUGH_DATA) {
-      const results = handLandmarkerRef.current.detectForVideo(video, performance.now());
+    // Draw hand landmarks from cached detection results (detected once per frame in game loop)
+    const results = detectionResultsRef.current;
+    if (results?.landmarks && results.landmarks.length > 0) {
+      const hand = results.landmarks[0];
       
-      if (results?.landmarks && results.landmarks.length > 0) {
-        const hand = results.landmarks[0] as Array<{ x: number; y: number; z: number }>;
+      ctx.fillStyle = '#00f5ff';
+      ctx.strokeStyle = '#00f5ff';
+      ctx.lineWidth = 1;
+      
+      // MediaPipe landmarks are normalized (0-1) relative to the video feed
+      // Scale to canvas dimensions and mirror X to match the mirrored video
+      const dotRadius = Math.max(2, Math.round(canvas.width / 160));
+      hand.forEach((landmark) => {
+        const x = canvas.width - (landmark.x * canvas.width);
+        const y = landmark.y * canvas.height;
         
-        ctx.fillStyle = '#00f5ff';
-        ctx.strokeStyle = '#00f5ff';
-        ctx.lineWidth = 2;
-        
-        // MediaPipe landmarks are normalized (0-1) relative to the video feed
-        // Scale to canvas dimensions and mirror X to match the mirrored video
-        hand.forEach((landmark) => {
-          const x = canvas.width - (landmark.x * canvas.width);
-          const y = landmark.y * canvas.height;
-          
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, 2 * Math.PI);
-          ctx.fill();
-        });
-      }
+        ctx.beginPath();
+        ctx.arc(x, y, dotRadius, 0, 2 * Math.PI);
+        ctx.fill();
+      });
     }
   };
 
@@ -1123,15 +1137,15 @@ export default function MultiplayerRace3D() {
 
   return (
     <div className="relative min-h-screen w-full bg-black flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline className="hidden" />
+      <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }} />
       
       {/* Game Canvas */}
       <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
       
       {/* Webcam Corner View */}
       <div className="absolute top-4 right-4 z-50">
-        <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)' }}>
-          <canvas ref={webcamCanvasRef} />
+        <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)', maxWidth: '280px' }}>
+          <canvas ref={webcamCanvasRef} style={{ width: '100%', height: 'auto', display: 'block', maxWidth: 'none' }} />
         </div>
         <p className="text-center text-white mt-2 text-sm font-bold">Your Camera</p>
       </div>
