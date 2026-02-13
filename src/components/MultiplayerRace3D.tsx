@@ -88,7 +88,6 @@ export default function MultiplayerRace3D() {
   const socketRef = useRef<Socket | null>(null);
   const roomCodeRef = useRef<string>('');
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const repStateRef = useRef<'waiting' | 'up' | 'down'>('waiting');
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionUpdateRef = useRef<number>(0);
   const isRoomCreatorRef = useRef<boolean>(false);
@@ -512,7 +511,7 @@ export default function MultiplayerRace3D() {
     const topHeight = CEILING_LEVEL - gapPosition - currentGap / 2;
     const topGeometry = new THREE.BoxGeometry(pipeWidth, topHeight, pipeWidth);
     const topPipe = new THREE.Mesh(topGeometry, pipeMaterial);
-    topPipe.position.set(playerXOffset, gapPosition + PIPE_GAP / 2 + topHeight / 2, zPosition); // Centered on player
+    topPipe.position.set(playerXOffset, gapPosition + currentGap / 2 + topHeight / 2, zPosition); // Centered on player
     topPipe.visible = isVisible;
     sceneRef.current.add(topPipe);
     
