@@ -553,6 +553,14 @@ export default function MultiplayerRace3D() {
           if (videoRef.current) {
             videoRef.current.onloadedmetadata = () => {
               videoRef.current?.play();
+              
+              // Set canvas size to match actual video dimensions
+              if (webcamCanvasRef.current && videoRef.current) {
+                webcamCanvasRef.current.width = videoRef.current.videoWidth;
+                webcamCanvasRef.current.height = videoRef.current.videoHeight;
+                console.log('Video dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
+              }
+              
               resolve(null);
             };
           }
@@ -911,10 +919,10 @@ export default function MultiplayerRace3D() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw mirrored video
+    // Draw mirrored video - use actual video dimensions
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, -video.videoWidth, 0, video.videoWidth, video.videoHeight);
     ctx.restore();
     
     // Draw hand landmarks
@@ -929,13 +937,16 @@ export default function MultiplayerRace3D() {
         ctx.lineWidth = 2;
         
         // MediaPipe landmarks are normalized (0-1)
-        // Scale directly to canvas size and mirror X
+        // Scale to actual video dimensions (which should match canvas) and mirror X
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        
         hand.forEach((landmark) => {
-          const x = canvas.width - (landmark.x * canvas.width);
-          const y = landmark.y * canvas.height;
+          const x = videoWidth - (landmark.x * videoWidth);
+          const y = landmark.y * videoHeight;
           
           ctx.beginPath();
-          ctx.arc(x, y, 5, 0, 2 * Math.PI);
+          ctx.arc(x, y, 3, 0, 2 * Math.PI); // Smaller dots (3 instead of 5)
           ctx.fill();
         });
       }
@@ -1117,7 +1128,7 @@ export default function MultiplayerRace3D() {
       {/* Webcam Corner View */}
       <div className="absolute top-4 right-4 z-50">
         <div className="border-4 border-pink-500 rounded-lg overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255, 105, 180, 0.5)' }}>
-          <canvas ref={webcamCanvasRef} width={320} height={240} />
+          <canvas ref={webcamCanvasRef} />
         </div>
         <p className="text-center text-white mt-2 text-sm font-bold">Your Camera</p>
       </div>
