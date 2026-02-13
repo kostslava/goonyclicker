@@ -44,6 +44,7 @@ app.prepare().then(() => {
       const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       rooms.set(roomCode, {
         players: [{ id: socket.id, name: playerName, score: 0, position: 0, multiplier: 1, currency: 0 }],
+        creator: socket.id,
         gameStarted: false,
         timeLimit: timeLimit || 120,
       });
@@ -63,27 +64,41 @@ app.prepare().then(() => {
         socket.emit('error', 'Room not found');
         return;
       }
-      if (room.players.length >= 2) {
-        console.log(`Room ${roomCode} is full`);
-        socket.emit('error', 'Room is full');
+      if (room.players.length >= 4) {
+        console.log(`Room ${roomCode} is full (max 4 players)`);
+        socket.emit('error', 'Room is full (max 4 players)');
         return;
       }
       
       room.players.push({ id: socket.id, name: playerName, score: 0, position: 0, multiplier: 1, currency: 0 });
       socket.join(roomCode);
       
-      console.log(`Player ${playerName} joined room ${roomCode}`);
+      console.log(`Player ${playerName} joined room ${roomCode}. Total players: ${room.players.length}/4`);
       
       io.to(roomCode).emit('player-joined', {
         players: room.players,
         roomCode,
+        creator: room.creator
       });
-      
-      if (room.players.length === 2) {
-        room.gameStarted = true;
-        console.log(`Game starting in room ${roomCode} with ${room.timeLimit}s time limit`);
-        io.to(roomCode).emit('game-start', { players: room.players, timeLimit: room.timeLimit });
+    });
+
+    socket.on('start-game', ({ roomCode }) => {
+      console.log(`Start game request from ${socket.id} for room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) {
+        socket.emit('error', 'Room not found');
+        return;
       }
+      
+      // Check if the requester is the room creator
+      if (socket.id !== room.creator) {
+        socket.emit('error', 'Only the room creator can start the game');
+        return;
+      }
+      
+      room.gameStarted = true;
+      console.log(`Game starting in room ${roomCode} with ${room.players.length} players, time limit ${room.timeLimit}s`);
+      io.to(roomCode).emit('game-start', { players: room.players, timeLimit: room.timeLimit });
     });
 
     socket.on('game-over', ({ roomCode }) => {
@@ -116,6 +131,17 @@ app.prepare().then(() => {
       } else {
         console.log(`Player ${socket.id} not found in room ${roomCode}`);
       }
+    });
+
+    socket.on('update-position', ({ roomCode, y, isAlive }) => {
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      socket.to(roomCode).emit('player-position', { 
+        playerId: socket.id, 
+        y, 
+        isAlive 
+      });
     });
 
     socket.on('update-multiplier', ({ roomCode, multiplier }) => {
