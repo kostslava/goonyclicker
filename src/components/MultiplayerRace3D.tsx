@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
-const HAND_UP_THRESHOLD = 0.45; // When hand Y is below this, consider it "up"
-const HAND_DOWN_THRESHOLD = 0.65; // When hand Y is above this, consider it "down"
+const MOVEMENT_THRESHOLD = 0.15; // Minimum Y change to register as movement
 const MOVEMENT_COOLDOWN = 400; // milliseconds between reps
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
@@ -190,6 +189,7 @@ export default function MultiplayerRace3D() {
   const lastHandYRef = useRef<number | null>(null);
   const detectionResultsRef = useRef<{ landmarks?: Array<Array<{ x: number; y: number; z: number }>> } | null>(null);
   const gameModeRef = useRef<GameMode>('race');
+  const ownedUpgradesRef = useRef<Map<string, number>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const roomCodeRef = useRef<string>('');
@@ -225,7 +225,8 @@ export default function MultiplayerRace3D() {
   const lastObstacleZRef = useRef(-25);
   const spectatingRef = useRef(false);
   const lastRepTimeRef = useRef<number>(0);
-  const handPositionRef = useRef<'up' | 'down' | 'middle'>(null);
+  const handPositionRef = useRef<'up' | 'down' | null>(null);
+  const peakHandYRef = useRef<number | null>(null); // Track highest/lowest point for movement detection
 
   // Init Socket.io
   useEffect(() => {
@@ -521,6 +522,11 @@ export default function MultiplayerRace3D() {
   useEffect(() => {
     gameModeRef.current = gameMode;
   }, [gameMode]);
+
+  // Sync ownedUpgradesRef with ownedUpgrades state for use in game loop closures
+  useEffect(() => {
+    ownedUpgradesRef.current = ownedUpgrades;
+  }, [ownedUpgrades]);
 
   // Three.js setup
   useEffect(() => {
@@ -888,78 +894,144 @@ export default function MultiplayerRace3D() {
       setCurrentHandY(handY);
       console.log('💾 State updated! handY =', handY.toFixed(3), '| Landmarks:', hand.length);
       
-      console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameModeRef.current);
+      console.log('🎯 Hand Y:', handY.toFixed(3), '| Last:', lastHandYRef.current?.toFixed(3), '| Direction:', handPositionRef.current, '| Peak:', peakHandYRef.current?.toFixed(3));
       
-      // Determine current hand position based on thresholds
-      let currentPosition: 'up' | 'down' | 'middle' = 'middle';
-      if (handY < HAND_UP_THRESHOLD) {
-        currentPosition = 'up';
-        console.log('✋ Hand is UP (Y < 0.45)');
-      } else if (handY > HAND_DOWN_THRESHOLD) {
-        currentPosition = 'down';
-        console.log('✋ Hand is DOWN (Y > 0.65)');
-      }
-      
-      // Detect a complete rep when hand crosses from one extreme to the other
-      const lastPosition = handPositionRef.current;
-      if (lastPosition && lastPosition !== 'middle' && currentPosition !== 'middle' && lastPosition !== currentPosition) {
-        const timeSinceLastRep = now - lastRepTimeRef.current;
+      // Track directional movement (up = Y decreasing, down = Y increasing)
+      // Initialize on first detection
+      if (lastHandYRef.current === null) {
+        lastHandYRef.current = handY;
+        peakHandYRef.current = handY;
+        handPositionRef.current = null;
+      } else {
+        const deltaY = handY - lastHandYRef.current;
         
-        if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
-          console.log('🎉 REP COMPLETED!', { from: lastPosition, to: currentPosition, handY: handY.toFixed(3) });
-          lastRepTimeRef.current = now;
-          
-          // In clicker mode, count this as a click
-          if (gameModeRef.current === 'clicker') {
-            setClickCount(prev => {
-              console.log('🍪 Click count:', prev + 1);
-              return prev + 1;
-            });
-            
-            // Calculate cookies earned based on multiplier upgrades
-            setCookies(prevCookies => {
-              let multiplier = 1;
-              ownedUpgrades.forEach((count, upgradeId) => {
-                const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                  multiplier *= Math.pow(upgrade.multiplier, count);
-                }
-              });
-              
-              const cookiesEarned = Math.floor(multiplier);
-              const newCookies = prevCookies + cookiesEarned;
-              console.log('🍪 Cookies earned:', cookiesEarned, '| Total:', newCookies);
-              
-              // Update score
-              setMyScore(newCookies);
-              if (socketRef.current && roomCodeRef.current) {
-                socketRef.current.emit('update-score', { 
-                  roomCode: roomCodeRef.current, 
-                  score: newCookies 
-                });
-              }
-              
-              // Trigger cookie crumble animation
-              const crumbleId = Date.now();
-              setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
-              setTimeout(() => {
-                setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
-              }, 1000);
-              
-              return newCookies;
-            });
-          } else if (gameModeRef.current === 'race') {
-            // In race mode, trigger flap
-            birdVelocityRef.current = flapStrengthRef.current;
-          }
-        } else {
-          console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
+        // Initialize peak if not set
+        if (peakHandYRef.current === null) {
+          peakHandYRef.current = handY;
         }
-      }
-      
-      // Update position reference
-      if (currentPosition !== 'middle') {
-        handPositionRef.current = currentPosition;
+        
+        // Detect significant upward movement (Y decreasing)
+        if (deltaY < -0.005) { // Moving up (smaller threshold for smoother detection)
+          // If we were going down and now moved up significantly from that low point, count a rep
+          if (handPositionRef.current === 'down' && peakHandYRef.current !== null && (peakHandYRef.current - handY) > MOVEMENT_THRESHOLD) {
+            const timeSinceLastRep = now - lastRepTimeRef.current;
+            
+            if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
+              console.log('🎉 REP COMPLETED! DOWN→UP, moved', (peakHandYRef.current - handY).toFixed(3));
+              lastRepTimeRef.current = now;
+              handPositionRef.current = 'up';
+              peakHandYRef.current = handY;
+              
+              // Count the rep
+              if (gameModeRef.current === 'clicker') {
+                setClickCount(prev => prev + 1);
+                
+                // Calculate cookies earned
+                setCookies(prevCookies => {
+                  let multiplier = 1;
+                  ownedUpgradesRef.current.forEach((count, upgradeId) => {
+                    const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                    if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                      multiplier *= Math.pow(upgrade.multiplier, count);
+                    }
+                  });
+                  
+                  const cookiesEarned = Math.floor(multiplier);
+                  const newCookies = prevCookies + cookiesEarned;
+                  console.log('💰 Multiplier:', multiplier, '| Cookies earned:', cookiesEarned, '| Total:', newCookies);
+                  
+                  setMyScore(newCookies);
+                  if (socketRef.current && roomCodeRef.current) {
+                    socketRef.current.emit('update-score', { 
+                      roomCode: roomCodeRef.current, 
+                      score: newCookies 
+                    });
+                  }
+                  
+                  // Trigger cookie crumble animation
+                  const crumbleId = Date.now();
+                  setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
+                  setTimeout(() => {
+                    setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
+                  }, 1000);
+                  
+                  return newCookies;
+                });
+              } else if (gameModeRef.current === 'race') {
+                birdVelocityRef.current = flapStrengthRef.current;
+              }
+            } else {
+              console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
+            }
+          } else {
+            // Still moving up, update peak
+            peakHandYRef.current = Math.min(peakHandYRef.current, handY);
+            if (handPositionRef.current === null) {
+              handPositionRef.current = 'up';
+            }
+          }
+        }
+        // Detect significant downward movement (Y increasing)
+        else if (deltaY > 0.005) { // Moving down
+          // If we were going up and now moved down significantly from that high point, count a rep
+          if (handPositionRef.current === 'up' && peakHandYRef.current !== null && (handY - peakHandYRef.current) > MOVEMENT_THRESHOLD) {
+            const timeSinceLastRep = now - lastRepTimeRef.current;
+            
+            if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
+              console.log('🎉 REP COMPLETED! UP→DOWN, moved', (handY - peakHandYRef.current).toFixed(3));
+              lastRepTimeRef.current = now;
+              handPositionRef.current = 'down';
+              peakHandYRef.current = handY;
+              
+              // Count the rep
+              if (gameModeRef.current === 'clicker') {
+                setClickCount(prev => prev + 1);
+                
+                // Calculate cookies earned
+                setCookies(prevCookies => {
+                  let multiplier = 1;
+                  ownedUpgradesRef.current.forEach((count, upgradeId) => {
+                    const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                    if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                      multiplier *= Math.pow(upgrade.multiplier, count);
+                    }
+                  });
+                  
+                  const cookiesEarned = Math.floor(multiplier);
+                  const newCookies = prevCookies + cookiesEarned;
+                  console.log('💰 Multiplier:', multiplier, '| Cookies earned:', cookiesEarned, '| Total:', newCookies);
+                  
+                  setMyScore(newCookies);
+                  if (socketRef.current && roomCodeRef.current) {
+                    socketRef.current.emit('update-score', { 
+                      roomCode: roomCodeRef.current, 
+                      score: newCookies 
+                    });
+                  }
+                  
+                  // Trigger cookie crumble animation
+                  const crumbleId = Date.now();
+                  setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
+                  setTimeout(() => {
+                    setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
+                  }, 1000);
+                  
+                  return newCookies;
+                });
+              } else if (gameModeRef.current === 'race') {
+                birdVelocityRef.current = flapStrengthRef.current;
+              }
+            } else {
+              console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
+            }
+          } else {
+            // Still moving down, update peak
+            peakHandYRef.current = Math.max(peakHandYRef.current, handY);
+            if (handPositionRef.current === null) {
+              handPositionRef.current = 'down';
+            }
+          }
+        }
       }
       
       lastHandYRef.current = handY;
@@ -1511,13 +1583,7 @@ export default function MultiplayerRace3D() {
                 <p className="text-2xl font-bold">
                   {currentHandY !== null ? (
                     <>
-                      {currentHandY < HAND_UP_THRESHOLD ? (
-                        <span className="text-green-400">✅ UP</span>
-                      ) : currentHandY > HAND_DOWN_THRESHOLD ? (
-                        <span className="text-blue-400">✅ DOWN</span>
-                      ) : (
-                        <span className="text-yellow-400">⏸️ MIDDLE</span>
-                      )}
+                      <span className="text-green-400">✅ Tracking</span>
                       <span className="text-sm text-gray-500 ml-2">
                         (Y: {currentHandY.toFixed(2)})
                       </span>
@@ -1531,8 +1597,8 @@ export default function MultiplayerRace3D() {
                   <ul className="list-disc list-inside text-left space-y-1">
                     <li>Show your full hand to the camera</li>
                     <li>Ensure good lighting on your hand</li>
-                    <li>Move hand UP (Y &lt; 0.45) or DOWN (Y &gt; 0.65)</li>
-                    <li>Avoid fast movements between positions</li>
+                    <li>Move hand UP and DOWN to count reps</li>
+                    <li>Each complete up/down motion = 1 rep</li>
                   </ul>
                 </div>
               </div>
@@ -1573,7 +1639,7 @@ export default function MultiplayerRace3D() {
             <div className="grid grid-cols-1 gap-4">
               {UPGRADES.map((upgrade) => {
                 const owned = ownedUpgrades.get(upgrade.id) || 0;
-                const cost = Math.floor(upgrade.baseCost * Math.pow(1.15, owned));
+                const cost = Math.floor(upgrade.baseCost * Math.pow(1.5, owned));
                 const canAfford = cookies >= cost;
                 
                 return (
