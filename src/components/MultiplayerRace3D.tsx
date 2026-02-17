@@ -151,6 +151,7 @@ interface Pipe {
   bottomCap: THREE.Mesh;
   topCap: THREE.Mesh;
   z: number;
+  initialZ: number;  // Store original Z position for deterministic updates
   passed: boolean;
   gapY: number;
   width: number;
@@ -808,6 +809,7 @@ export default function MultiplayerRace3D() {
       bottomCap,
       topCap,
       z: zPosition,
+      initialZ: zPosition,  // Store the initial Z position
       passed: false,
       gapY: gapPosition,
       width: pipeWidth
@@ -1452,10 +1454,10 @@ export default function MultiplayerRace3D() {
       for (let i = pipesRef.current.length - 1; i >= 0; i--) {
         const pipe = pipesRef.current[i];
         
-        // Each pipe starts at -25 - i*25 and moves forward at pipeSpeed
-        const initialZ = -25 - i * 25;
+        // Use the stored initialZ instead of calculating from array index
+        // This prevents position jumps when pipes are removed from the array
         const travelDistance = pipeSpeedRef.current * elapsedGameTimeSec * 60; // Normalize to 60 FPS equivalent
-        pipe.z = initialZ + travelDistance;
+        pipe.z = pipe.initialZ + travelDistance;
         
         // Update pipe positions - keep them centered on player's X position
         pipe.bottom.position.set(xOffset, pipe.bottom.position.y, pipe.z);
