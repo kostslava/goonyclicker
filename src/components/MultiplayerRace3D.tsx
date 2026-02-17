@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
-const MOVEMENT_THRESHOLD = 0.15; // Minimum Y change to register as movement
+const MOVEMENT_THRESHOLD = 0.01; // Minimum Y change to register as movement (~5 pixels on 480px canvas)
 const MOVEMENT_COOLDOWN = 400; // milliseconds between reps
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
