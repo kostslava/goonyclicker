@@ -278,6 +278,7 @@ export default function MultiplayerRace3D() {
   const flapStrengthRef = useRef(9);
   const pipeSpeedRef = useRef(0.08);
   const pipeGapRef = useRef(6);
+  const difficultyRef = useRef<Difficulty>('medium');
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -353,6 +354,7 @@ export default function MultiplayerRace3D() {
       const diff = (gameDifficulty || 'medium') as Difficulty;
       const settings = DIFFICULTY_SETTINGS[diff];
       setDifficulty(diff);
+      difficultyRef.current = diff;
       setGameMode((mode || 'race') as GameMode);
       
       // Set game parameter refs
@@ -821,8 +823,8 @@ export default function MultiplayerRace3D() {
       medium: 0xFFA500, // Orange
       hard: 0x8B0000    // Dark Red
     };
-    const pipeColor = pipeColors[difficulty] || pipeColors.medium;
-    const capColor = capColors[difficulty] || capColors.medium;
+    const pipeColor = pipeColors[difficultyRef.current] || pipeColors.medium;
+    const capColor = capColors[difficultyRef.current] || capColors.medium;
     
     // Bottom pipe - using MeshBasicMaterial for performance
     const bottomHeight = gapPosition - GROUND_LEVEL - currentGap / 2;
@@ -1692,9 +1694,9 @@ export default function MultiplayerRace3D() {
     return (
       <div className="flex min-h-screen w-full bg-black text-white flex-col items-center justify-center p-4">
         <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
-          GoonyClicker
+          Motion Games
         </h1>
-        <p className="text-xl text-gray-400 mb-12">Motion-controlled multiplayer games!</p>
+        <p className="text-xl text-gray-400 mb-12">Hand-tracking multiplayer games!</p>
         
         <div className="max-w-2xl w-full flex gap-8">
           {/* Left: Game Settings */}
@@ -1741,7 +1743,11 @@ export default function MultiplayerRace3D() {
                   <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
                   <select
                     value={difficulty}
-                    onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                    onChange={(e) => {
+                      const newDiff = e.target.value as Difficulty;
+                      setDifficulty(newDiff);
+                      difficultyRef.current = newDiff;
+                    }}
                     className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
                   >
                     <option value="easy">Easy (Green Pipes)</option>

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Goon Racer - Multiplayer Racing Game",
-  description: "Compete against friends in this hand-tracking racing game",
+  title: "Motion Games - Multiplayer Racing & Clicker",
+  description: "Compete against friends in hand-tracking multiplayer games",
 };
 
 export default function RootLayout({
