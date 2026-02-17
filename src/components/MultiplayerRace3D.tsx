@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
-const MOVEMENT_THRESHOLD = 0.02;
+const MOVEMENT_THRESHOLD = 0.08;
+const MOVEMENT_COOLDOWN = 500; // milliseconds between reps
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
 const CEILING_LEVEL = 15;
@@ -176,6 +177,7 @@ export default function MultiplayerRace3D() {
   const [ownedUpgrades, setOwnedUpgrades] = useState<Map<string, number>>(new Map());
   const [showShop, setShowShop] = useState(false);
   const [showUpgrades, setShowUpgrades] = useState(false);
+  const [cookieCrumbles, setCookieCrumbles] = useState<Array<{ id: number; x: number; y: number }>>([]);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -219,6 +221,8 @@ export default function MultiplayerRace3D() {
   const isGameRunningRef = useRef(false);
   const lastObstacleZRef = useRef(-25);
   const spectatingRef = useRef(false);
+  const lastRepTimeRef = useRef<number>(0);
+  const handDirectionRef = useRef<'up' | 'down' | null>(null);
 
   // Init Socket.io
   useEffect(() => {
@@ -839,57 +843,86 @@ export default function MultiplayerRace3D() {
     // Target 60 FPS as baseline (deltaTime will be ~0.0167 at 60fps)
     const timeScale = deltaTime * 60; // Normalize to 60 FPS
     
-    // Only process player physics and input if player is alive AND game is running
-    if (!gameOverRef.current && isGameRunningRef.current) {
+    // Hand tracking for both modes (race needs game running, clicker doesn't)
+    const shouldProcessHands = gameMode === 'clicker' ? !gameOverRef.current : (!gameOverRef.current && isGameRunningRef.current);
+    
+    if (shouldProcessHands) {
       // Use cached hand detection results (detection runs once per frame in game loop)
       const results = detectionResultsRef.current;
       if (results?.landmarks && results.landmarks.length > 0) {
         const hand = results.landmarks[0];
         const wrist = hand[0];
         const handY = wrist.y;
+        const now = Date.now();
         
         if (lastHandYRef.current !== null) {
           const deltaY = handY - lastHandYRef.current;
           
-          // Hand moved up = flap/click
-          if (deltaY < -MOVEMENT_THRESHOLD) {
-            birdVelocityRef.current = flapStrengthRef.current;
-            console.log('FLAP!');
+          // Track hand direction
+          if (Math.abs(deltaY) > MOVEMENT_THRESHOLD) {
+            const newDirection = deltaY < 0 ? 'up' : 'down';
             
-            // In clicker mode, count this as a click
-            if (gameMode === 'clicker') {
-              setClickCount(prev => prev + 1);
+            // Detect a complete rep (up then down or down then up)
+            if (handDirectionRef.current && handDirectionRef.current !== newDirection) {
+              // Direction changed - this is a rep!
+              const timeSinceLastRep = now - lastRepTimeRef.current;
               
-              // Calculate cookies earned based on multiplier upgrades
-              setCookies(prevCookies => {
-                let multiplier = 1;
-                ownedUpgrades.forEach((count, upgradeId) => {
-                  const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                  if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                    multiplier *= Math.pow(upgrade.multiplier, count);
-                  }
-                });
+              if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
+                console.log('REP COMPLETED!', { direction: handDirectionRef.current, newDirection, deltaY });
+                lastRepTimeRef.current = now;
                 
-                const cookiesEarned = Math.floor(multiplier);
-                const newCookies = prevCookies + cookiesEarned;
-                
-                // Update score
-                setMyScore(newCookies);
-                if (socketRef.current && roomCodeRef.current) {
-                  socketRef.current.emit('update-score', { 
-                    roomCode: roomCodeRef.current, 
-                    score: newCookies 
+                // In clicker mode, count this as a click
+                if (gameMode === 'clicker') {
+                  setClickCount(prev => prev + 1);
+                  
+                  // Calculate cookies earned based on multiplier upgrades
+                  setCookies(prevCookies => {
+                    let multiplier = 1;
+                    ownedUpgrades.forEach((count, upgradeId) => {
+                      const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                      if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                        multiplier *= Math.pow(upgrade.multiplier, count);
+                      }
+                    });
+                    
+                    const cookiesEarned = Math.floor(multiplier);
+                    const newCookies = prevCookies + cookiesEarned;
+                    
+                    // Update score
+                    setMyScore(newCookies);
+                    if (socketRef.current && roomCodeRef.current) {
+                      socketRef.current.emit('update-score', { 
+                        roomCode: roomCodeRef.current, 
+                        score: newCookies 
+                      });
+                    }
+                    
+                    // Trigger cookie crumble animation
+                    const crumbleId = Date.now();
+                    setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
+                    setTimeout(() => {
+                      setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
+                    }, 1000);
+                    
+                    return newCookies;
                   });
+                } else if (gameMode === 'race') {
+                  // In race mode, trigger flap
+                  birdVelocityRef.current = flapStrengthRef.current;
                 }
-                
-                return newCookies;
-              });
+              }
             }
+            
+            handDirectionRef.current = newDirection;
           }
         }
         
         lastHandYRef.current = handY;
       }
+    }
+    
+    // Only process player physics and input if player is alive AND game is running
+    if (!gameOverRef.current && isGameRunningRef.current) {
       
       // Bird physics - only in race mode
       if (gameMode === 'race') {
@@ -1173,6 +1206,32 @@ export default function MultiplayerRace3D() {
         ctx.beginPath();
         ctx.arc(x, y, dotRadius, 0, 2 * Math.PI);
         ctx.fill();
+      });
+    }
+    
+    // Draw cookie crumbles animation
+    if (gameMode === 'clicker' && cookieCrumbles.length > 0) {
+      cookieCrumbles.forEach(crumble => {
+        const x = canvas.width - (crumble.x * canvas.width);
+        const y = crumble.y * canvas.height;
+        
+        // Draw multiple cookie crumbs spreading out
+        ctx.fillStyle = '#D2691E';
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2;
+          const distance = 20 + Math.random() * 30;
+          const crumbX = x + Math.cos(angle) * distance;
+          const crumbY = y + Math.sin(angle) * distance;
+          const size = 3 + Math.random() * 5;
+          
+          ctx.beginPath();
+          ctx.arc(crumbX, crumbY, size, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+        
+        // Draw cookie emoji at center
+        ctx.font = '40px Arial';
+        ctx.fillText('🍪', x - 20, y + 15);
       });
     }
   };
