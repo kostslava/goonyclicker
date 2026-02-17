@@ -722,6 +722,9 @@ export default function MultiplayerRace3D() {
         },
         runningMode: 'VIDEO',
         numHands: 1,
+        minHandDetectionConfidence: 0.3,  // Lower threshold for better detection (default: 0.5)
+        minHandPresenceConfidence: 0.3,   // Lower threshold for better tracking (default: 0.5)
+        minTrackingConfidence: 0.3        // Lower threshold for smoother tracking (default: 0.5)
       });
       
       handLandmarkerRef.current = landmarker;
@@ -851,10 +854,14 @@ export default function MultiplayerRace3D() {
     
     // Always check for hand detection results first (before any condition)
     const results = detectionResultsRef.current;
-    const hasHandDetected = !!(results?.landmarks && results.landmarks.length > 0);
+    
+    // Validate hand detection - check for sufficient landmarks (MediaPipe returns 21 landmarks for a complete hand)
+    const hasValidHand = !!(results?.landmarks && results.landmarks.length > 0 && results.landmarks[0].length >= 16);
     
     console.log('🔍 Update Check:', {
-      hasHandDetected,
+      hasLandmarks: !!(results?.landmarks && results.landmarks.length > 0),
+      numLandmarks: results?.landmarks?.[0]?.length || 0,
+      hasValidHand,
       gameMode,
       gameOverRef: gameOverRef.current,
       isGameRunningRef: isGameRunningRef.current
@@ -863,9 +870,9 @@ export default function MultiplayerRace3D() {
     // Hand tracking for both modes (race needs game running, clicker doesn't)
     const shouldProcessHands = gameMode === 'clicker' ? !gameOverRef.current : (!gameOverRef.current && isGameRunningRef.current);
     
-    console.log('✅ Should process hands:', shouldProcessHands);
+    console.log('✅ Should process hands:', shouldProcessHands, '| Valid hand:', hasValidHand);
     
-    if (shouldProcessHands && hasHandDetected && results?.landmarks) {
+    if (shouldProcessHands && hasValidHand && results?.landmarks) {
       const hand = results.landmarks[0];
       const wrist = hand[0];
       const handY = wrist.y;
@@ -873,7 +880,7 @@ export default function MultiplayerRace3D() {
       
       // Update state for UI indicator IMMEDIATELY
       setCurrentHandY(handY);
-      console.log('💾 State updated! handY =', handY.toFixed(3));
+      console.log('💾 State updated! handY =', handY.toFixed(3), '| Landmarks:', hand.length);
       
       console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameMode);
       
@@ -951,8 +958,16 @@ export default function MultiplayerRace3D() {
       
       lastHandYRef.current = handY;
     } else {
-      console.log('❌ No hand detected in this frame');
-      setCurrentHandY(null);
+      if (!shouldProcessHands) {
+        console.log('⏸️ Hand processing paused (game state)');
+      } else if (!hasValidHand) {
+        console.log('❌ No valid hand detected (need 16+ landmarks, got', results?.landmarks?.[0]?.length || 0, ')');
+      }
+      // Don't immediately set to null - keep showing last valid position for smoother UI
+      // Only set to null if no detection for extended period
+      if (!results?.landmarks || results.landmarks.length === 0) {
+        setCurrentHandY(null);
+      }
     }
     
     // Only process player physics and input if player is alive AND game is running
@@ -1486,28 +1501,34 @@ export default function MultiplayerRace3D() {
               
               {/* Hand Position Indicator */}
               <div className="mt-4 pt-4 border-t border-gray-700">
-                <p className="text-sm text-gray-500 mb-1">Hand Status</p>
+                <p className="text-sm text-gray-500 mb-1">Hand Tracking Status</p>
                 <p className="text-2xl font-bold">
                   {currentHandY !== null ? (
                     <>
                       {currentHandY < HAND_UP_THRESHOLD ? (
-                        <span className="text-green-400">✋ UP</span>
+                        <span className="text-green-400">✅ UP</span>
                       ) : currentHandY > HAND_DOWN_THRESHOLD ? (
-                        <span className="text-blue-400">👇 DOWN</span>
+                        <span className="text-blue-400">✅ DOWN</span>
                       ) : (
-                        <span className="text-gray-400">➡️ MIDDLE</span>
+                        <span className="text-yellow-400">⏸️ MIDDLE</span>
                       )}
                       <span className="text-sm text-gray-500 ml-2">
-                        ({currentHandY.toFixed(2)})
+                        (Y: {currentHandY.toFixed(2)})
                       </span>
                     </>
                   ) : (
-                    <span className="text-red-400">❌ No Hand</span>
+                    <span className="text-red-400">❌ Not Detected</span>
                   )}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  Move hand: UP &lt; {HAND_UP_THRESHOLD} | DOWN &gt; {HAND_DOWN_THRESHOLD}
-                </p>
+                <div className="text-xs text-gray-500 mt-2 bg-gray-800 p-2 rounded">
+                  <p className="mb-1">💡 <b>Tips for best tracking:</b></p>
+                  <ul className="list-disc list-inside text-left space-y-1">
+                    <li>Show your full hand to the camera</li>
+                    <li>Ensure good lighting on your hand</li>
+                    <li>Move hand UP (Y &lt; 0.45) or DOWN (Y &gt; 0.65)</li>
+                    <li>Avoid fast movements between positions</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
