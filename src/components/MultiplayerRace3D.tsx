@@ -41,6 +41,7 @@ const DIFFICULTY_SETTINGS = {
 
 type Difficulty = keyof typeof DIFFICULTY_SETTINGS;
 type GameMode = 'race' | 'clicker';
+type TimeLimit = 120 | 300 | 600; // 2, 5, or 10 minutes in seconds
 
 interface Player {
   id: string;
@@ -52,96 +53,132 @@ interface Upgrade {
   id: string;
   name: string;
   baseCost: number;
-  type: 'multiplier' | 'passive';
-  multiplier?: number; // For multiplier upgrades (cookies per click)
-  cps?: number; // For passive upgrades (cookies per second)
+  type: 'hand' | 'building';
+  multiplier?: number; // For hand upgrades (cookies per click)
+  cps?: number; // For building upgrades (cookies per second)
   description: string;
   icon: string;
+  requiredNetWorth?: number; // For buildings, unlock at certain net worth
 }
 
 const UPGRADES: Upgrade[] = [
-  // Multiplier upgrades
+  // Hand upgrades - one-time purchases with expensive progression
   {
-    id: 'double_click',
-    name: 'Double Click',
-    baseCost: 10,
-    type: 'multiplier',
+    id: 'hand_tier1',
+    name: 'Stronger Hands',
+    baseCost: 100,
+    type: 'hand',
     multiplier: 2,
     description: '2x cookies per click',
-    icon: '✌️'
+    icon: '👋'
   },
   {
-    id: 'mega_click',
-    name: 'Mega Click',
-    baseCost: 50,
-    type: 'multiplier',
-    multiplier: 5,
-    description: '5x cookies per click',
+    id: 'hand_tier2',
+    name: 'Iron Grip',
+    baseCost: 10000,
+    type: 'hand',
+    multiplier: 2,
+    description: '2x cookies per click',
+    icon: '✊'
+  },
+  {
+    id: 'hand_tier3',
+    name: 'Titan Fists',
+    baseCost: 1000000,
+    type: 'hand',
+    multiplier: 2,
+    description: '2x cookies per click',
     icon: '💪'
   },
   {
-    id: 'ultra_click',
-    name: 'Ultra Click',
-    baseCost: 200,
-    type: 'multiplier',
-    multiplier: 10,
-    description: '10x cookies per click',
-    icon: '⚡'
-  },
-  {
-    id: 'legendary_click',
-    name: 'Legendary Click',
-    baseCost: 1000,
-    type: 'multiplier',
-    multiplier: 50,
-    description: '50x cookies per click',
+    id: 'hand_tier4',
+    name: 'God Hands',
+    baseCost: 100000000,
+    type: 'hand',
+    multiplier: 2,
+    description: '2x cookies per click',
     icon: '🔥'
   },
-  // Passive upgrades
+  // Building upgrades - incremental cost, unlock based on net worth
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    baseCost: 15,
+    type: 'building',
+    cps: 0.1,
+    description: '+0.1 cookie/sec',
+    icon: '👆',
+    requiredNetWorth: 0
+  },
   {
     id: 'grandma',
     name: 'Grandma',
-    baseCost: 15,
-    type: 'passive',
+    baseCost: 100,
+    type: 'building',
     cps: 1,
     description: '+1 cookie/sec',
-    icon: '👵'
+    icon: '👵',
+    requiredNetWorth: 50
   },
   {
     id: 'farm',
     name: 'Cookie Farm',
-    baseCost: 100,
-    type: 'passive',
+    baseCost: 1100,
+    type: 'building',
     cps: 8,
     description: '+8 cookies/sec',
-    icon: '🌾'
-  },
-  {
-    id: 'factory',
-    name: 'Cookie Factory',
-    baseCost: 500,
-    type: 'passive',
-    cps: 50,
-    description: '+50 cookies/sec',
-    icon: '🏭'
+    icon: '🌾',
+    requiredNetWorth: 500
   },
   {
     id: 'mine',
     name: 'Cookie Mine',
-    baseCost: 2000,
-    type: 'passive',
-    cps: 200,
-    description: '+200 cookies/sec',
-    icon: '⛏️'
+    baseCost: 12000,
+    type: 'building',
+    cps: 47,
+    description: '+47 cookies/sec',
+    icon: '⛏️',
+    requiredNetWorth: 5000
+  },
+  {
+    id: 'factory',
+    name: 'Cookie Factory',
+    baseCost: 130000,
+    type: 'building',
+    cps: 260,
+    description: '+260 cookies/sec',
+    icon: '🏭',
+    requiredNetWorth: 50000
+  },
+  {
+    id: 'bank',
+    name: 'Cookie Bank',
+    baseCost: 1400000,
+    type: 'building',
+    cps: 1400,
+    description: '+1400 cookies/sec',
+    icon: '🏦',
+    requiredNetWorth: 500000
+  },
+  {
+    id: 'temple',
+    name: 'Cookie Temple',
+    baseCost: 20000000,
+    type: 'building',
+    cps: 7800,
+    description: '+7800 cookies/sec',
+    icon: '⛩️',
+    requiredNetWorth: 5000000
   },
   {
     id: 'spaceship',
     name: 'Cookie Spaceship',
-    baseCost: 10000,
-    type: 'passive',
-    cps: 1000,
-    description: '+1000 cookies/sec',
-    icon: '🚀'
+    baseCost: 330000000,
+    type: 'building',
+    cps: 44000,
+    description: '+44000 cookies/sec',
+    icon: '🚀',
+    requiredNetWorth: 50000000
   }
 ];
 
@@ -176,6 +213,7 @@ export default function MultiplayerRace3D() {
   const [isTracking, setIsTracking] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [gameMode, setGameMode] = useState<GameMode>('race');
+  const [timeLimit, setTimeLimit] = useState<TimeLimit>(300);
   const [isCreator, setIsCreator] = useState(false);
   const [clickCount, setClickCount] = useState(0);
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
@@ -553,7 +591,7 @@ export default function MultiplayerRace3D() {
         let totalCPS = 0;
         ownedUpgrades.forEach((count, upgradeId) => {
           const upgrade = UPGRADES.find(u => u.id === upgradeId);
-          if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+          if (upgrade && upgrade.type === 'building' && upgrade.cps) {
             totalCPS += upgrade.cps * count;
           }
         });
@@ -772,10 +810,24 @@ export default function MultiplayerRace3D() {
     const totalBirdWidth = (numPlayers - 1) * birdSpacing;
     const pipeWidth = Math.max(PIPE_WIDTH, totalBirdWidth + 8); // +8 for margin on both sides
     
+    // Determine pipe color based on difficulty
+    const pipeColors = {
+      easy: 0x228B22,   // Green
+      medium: 0xFFD700, // Yellow
+      hard: 0xFF0000    // Red
+    };
+    const capColors = {
+      easy: 0x006400,   // Dark Green
+      medium: 0xFFA500, // Orange
+      hard: 0x8B0000    // Dark Red
+    };
+    const pipeColor = pipeColors[difficulty] || pipeColors.medium;
+    const capColor = capColors[difficulty] || capColors.medium;
+    
     // Bottom pipe - using MeshBasicMaterial for performance
     const bottomHeight = gapPosition - GROUND_LEVEL - currentGap / 2;
     const bottomGeometry = new THREE.BoxGeometry(pipeWidth, bottomHeight, pipeWidth);
-    const pipeMaterial = new THREE.MeshBasicMaterial({ color: 0x228B22 }); // Changed to MeshBasicMaterial
+    const pipeMaterial = new THREE.MeshBasicMaterial({ color: pipeColor });
     const bottomPipe = new THREE.Mesh(bottomGeometry, pipeMaterial);
     bottomPipe.position.set(playerXOffset, GROUND_LEVEL + bottomHeight / 2, zPosition); // Centered on player
     bottomPipe.visible = isVisible;
@@ -791,7 +843,7 @@ export default function MultiplayerRace3D() {
     
     // Caps - using MeshBasicMaterial for performance
     const capGeometry = new THREE.BoxGeometry(pipeWidth + 1, 0.5, pipeWidth + 1);
-    const capMaterial = new THREE.MeshBasicMaterial({ color: 0x006400 }); // Changed to MeshBasicMaterial
+    const capMaterial = new THREE.MeshBasicMaterial({ color: capColor });
     
     const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
     bottomCap.position.set(playerXOffset, gapPosition - currentGap / 2, zPosition); // Centered on player
@@ -937,6 +989,13 @@ export default function MultiplayerRace3D() {
       const totalWidth = (numPlayers - 1) * spacing;
       const playerXOffset = playerIndex * spacing - totalWidth / 2;
       
+      // Initialize bird X position immediately for multiplayer
+      if (birdRef.current) {
+        birdRef.current.position.x = playerXOffset;
+        birdRef.current.position.y = 0;
+        birdRef.current.position.z = 0;
+      }
+      
       for (let i = 0; i < 30; i++) {
         // Use a deterministic seed based on index for consistent random values
         const seed = (Math.sin(i * 12.9898) + 1) / 2; // Generates value between 0 and 1
@@ -1076,7 +1135,7 @@ export default function MultiplayerRace3D() {
               let totalCPS = 0;
               ownedUpgradesRef.current.forEach((count, upgradeId) => {
                 const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+                if (upgrade && upgrade.type === 'building' && upgrade.cps) {
                   totalCPS += upgrade.cps * count;
                 }
               });
@@ -1196,8 +1255,8 @@ export default function MultiplayerRace3D() {
                     let clickMultiplier = 1;
                     ownedUpgradesRef.current.forEach((count, upgradeId) => {
                       const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                      if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                        clickMultiplier *= Math.pow(upgrade.multiplier, count);
+                      if (upgrade && upgrade.type === 'hand' && upgrade.multiplier) {
+                        clickMultiplier *= upgrade.multiplier; // Hand upgrades stack multiplicatively
                       }
                     });
                     const megaBonus = Math.floor(clickMultiplier * 100);
@@ -1220,8 +1279,8 @@ export default function MultiplayerRace3D() {
                   let multiplier = 1;
                   ownedUpgradesRef.current.forEach((count, upgradeId) => {
                     const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                    if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                      multiplier *= Math.pow(upgrade.multiplier, count);
+                    if (upgrade && upgrade.type === 'hand' && upgrade.multiplier) {
+                      multiplier *= upgrade.multiplier; // Hand upgrades stack multiplicatively
                     }
                   });
                   
@@ -1677,16 +1736,33 @@ export default function MultiplayerRace3D() {
             </div>
             
             <div>
-              <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
-              <select
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-                className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
-              >
-                <option value="easy">Easy (Slower, Easier)</option>
-                <option value="medium">Medium (Normal)</option>
-                <option value="hard">Hard (Faster, Harder)</option>
-              </select>
+              {gameMode === 'race' ? (
+                <>
+                  <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
+                  <select
+                    value={difficulty}
+                    onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                    className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
+                  >
+                    <option value="easy">Easy (Green Pipes)</option>
+                    <option value="medium">Medium (Yellow Pipes)</option>
+                    <option value="hard">Hard (Red Pipes)</option>
+                  </select>
+                </>
+              ) : (
+                <>
+                  <label className="block text-sm text-gray-400 mb-2">Time Limit</label>
+                  <select
+                    value={timeLimit}
+                    onChange={(e) => setTimeLimit(Number(e.target.value) as TimeLimit)}
+                    className="w-full px-4 py-3 bg-gray-900 border-2 border-pink-500 rounded-lg text-white focus:outline-none"
+                  >
+                    <option value="120">2 Minutes</option>
+                    <option value="300">5 Minutes</option>
+                    <option value="600">10 Minutes</option>
+                  </select>
+                </>
+              )}
             </div>
             
             <button
@@ -1942,7 +2018,7 @@ export default function MultiplayerRace3D() {
                   let totalCPS = 0;
                   ownedUpgrades.forEach((count, upgradeId) => {
                     const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                    if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+                    if (upgrade && upgrade.type === 'building' && upgrade.cps) {
                       totalCPS += upgrade.cps * count;
                     }
                   });
@@ -1997,52 +2073,121 @@ export default function MultiplayerRace3D() {
               ×
             </button>
             <h2 className="text-5xl font-bold mb-6 text-green-400 text-center">🏪 Cookie Shop</h2>
-            <div className="grid grid-cols-1 gap-4">
-              {UPGRADES.map((upgrade) => {
-                const owned = ownedUpgrades.get(upgrade.id) || 0;
-                const cost = Math.floor(upgrade.baseCost * Math.pow(1.5, owned));
-                const canAfford = cookies >= cost;
-                
-                return (
-                  <div
-                    key={upgrade.id}
-                    className={`bg-gray-800 border-2 rounded-lg p-4 flex items-center justify-between ${
-                      canAfford ? 'border-green-400' : 'border-gray-600 opacity-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <span className="text-5xl">{upgrade.icon}</span>
-                      <div>
-                        <p className="text-2xl font-bold text-white">{upgrade.name}</p>
-                        <p className="text-lg text-gray-400">{upgrade.description}</p>
-                        {owned > 0 && (
-                          <p className="text-sm text-cyan-400">Owned: {owned}</p>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        if (canAfford) {
-                          setCookies(prev => prev - cost);
-                          setOwnedUpgrades(prev => {
-                            const newMap = new Map(prev);
-                            newMap.set(upgrade.id, (newMap.get(upgrade.id) || 0) + 1);
-                            return newMap;
-                          });
-                        }
-                      }}
-                      disabled={!canAfford}
-                      className={`px-6 py-3 rounded-lg font-bold text-xl transition-all ${
-                        canAfford
-                          ? 'bg-green-600 hover:bg-green-500 text-white cursor-pointer'
-                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            <div className="mb-4 text-center">
+              <p className="text-xl text-yellow-400 font-bold">Your Total Worth: 🍪 {Math.floor(cookies)}</p>
+            </div>
+            
+            {/* Hand Upgrades Section */}
+            <div className="mb-8">
+              <h3 className="text-3xl font-bold mb-4 text-cyan-400">👋 Hand Upgrades (One-Time)</h3>
+              <div className="grid grid-cols-1 gap-4">
+                {UPGRADES.filter(u => u.type === 'hand').map((upgrade) => {
+                  const owned = ownedUpgrades.get(upgrade.id) || 0;
+                  const alreadyOwned = owned > 0;
+                  const cost = upgrade.baseCost;
+                  const canAfford = cookies >= cost && !alreadyOwned;
+                  
+                  return (
+                    <div
+                      key={upgrade.id}
+                      className={`bg-gray-800 border-2 rounded-lg p-4 flex items-center justify-between ${
+                        alreadyOwned ? 'border-green-400 bg-green-900 bg-opacity-20' :
+                        canAfford ? 'border-cyan-400' : 'border-gray-600 opacity-50'
                       }`}
                     >
-                      🍪 {cost}
-                    </button>
-                  </div>
-                );
-              })}
+                      <div className="flex items-center gap-4">
+                        <span className="text-5xl">{upgrade.icon}</span>
+                        <div>
+                          <p className="text-2xl font-bold text-white">{upgrade.name}</p>
+                          <p className="text-lg text-gray-400">{upgrade.description}</p>
+                          {alreadyOwned && (
+                            <p className="text-sm text-green-400 font-bold">✓ OWNED</p>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (canAfford) {
+                            setCookies(prev => prev - cost);
+                            setOwnedUpgrades(prev => {
+                              const newMap = new Map(prev);
+                              newMap.set(upgrade.id, 1);
+                              return newMap;
+                            });
+                          }
+                        }}
+                        disabled={!canAfford || alreadyOwned}
+                        className={`px-6 py-3 rounded-lg font-bold text-xl transition-all ${
+                          alreadyOwned ? 'bg-gray-700 text-gray-500 cursor-not-allowed' :
+                          canAfford
+                            ? 'bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer'
+                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        }`}
+                      >
+                        {alreadyOwned ? '✓' : `🍪 ${cost.toLocaleString()}`}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            
+            {/* Building Upgrades Section */}
+            <div>
+              <h3 className="text-3xl font-bold mb-4 text-pink-400">🏢 Buildings (Cookie Production)</h3>
+              <div className="grid grid-cols-1 gap-4">
+                {UPGRADES.filter(u => u.type === 'building').map((upgrade) => {
+                  const owned = ownedUpgrades.get(upgrade.id) || 0;
+                  const cost = Math.floor(upgrade.baseCost * Math.pow(1.15, owned));
+                  const canAfford = cookies >= cost;
+                  const isUnlocked = cookies >= (upgrade.requiredNetWorth || 0);
+                  
+                  return (
+                    <div
+                      key={upgrade.id}
+                      className={`bg-gray-800 border-2 rounded-lg p-4 flex items-center justify-between ${
+                        !isUnlocked ? 'border-gray-700 opacity-30' :
+                        canAfford ? 'border-pink-400' : 'border-gray-600 opacity-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <span className="text-5xl">{upgrade.icon}</span>
+                        <div>
+                          <p className="text-2xl font-bold text-white">{upgrade.name}</p>
+                          <p className="text-lg text-gray-400">{upgrade.description}</p>
+                          {!isUnlocked && upgrade.requiredNetWorth && (
+                            <p className="text-sm text-red-400">🔒 Unlock at {upgrade.requiredNetWorth.toLocaleString()} cookies</p>
+                          )}
+                          {owned > 0 && (
+                            <p className="text-sm text-cyan-400">Owned: {owned} | Total: +{(upgrade.cps! * owned).toFixed(1)}/sec</p>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (canAfford && isUnlocked) {
+                            setCookies(prev => prev - cost);
+                            setOwnedUpgrades(prev => {
+                              const newMap = new Map(prev);
+                              newMap.set(upgrade.id, (newMap.get(upgrade.id) || 0) + 1);
+                              return newMap;
+                            });
+                          }
+                        }}
+                        disabled={!canAfford || !isUnlocked}
+                        className={`px-6 py-3 rounded-lg font-bold text-xl transition-all ${
+                          !isUnlocked ? 'bg-gray-700 text-gray-500 cursor-not-allowed' :
+                          canAfford
+                            ? 'bg-pink-600 hover:bg-pink-500 text-white cursor-pointer'
+                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        }`}
+                      >
+                        🍪 {cost.toLocaleString()}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -2068,12 +2213,11 @@ export default function MultiplayerRace3D() {
                   if (!upgrade) return null;
                   
                   let effectText = '';
-                  if (upgrade.type === 'multiplier' && upgrade.multiplier) {
-                    const totalMultiplier = Math.pow(upgrade.multiplier, count);
-                    effectText = `${totalMultiplier}x cookies per click`;
-                  } else if (upgrade.type === 'passive' && upgrade.cps) {
+                  if (upgrade.type === 'hand' && upgrade.multiplier) {
+                    effectText = `${upgrade.multiplier}x cookies per click`;
+                  } else if (upgrade.type === 'building' && upgrade.cps) {
                     const totalCPS = upgrade.cps * count;
-                    effectText = `+${totalCPS} cookies/sec`;
+                    effectText = `+${totalCPS.toFixed(1)} cookies/sec`;
                   }
                   
                   return (
@@ -2116,11 +2260,11 @@ export default function MultiplayerRace3D() {
                 let totalCPS = 0;
                 ownedUpgrades.forEach((count, upgradeId) => {
                   const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                  if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+                  if (upgrade && upgrade.type === 'building' && upgrade.cps) {
                     totalCPS += upgrade.cps * count;
                   }
                 });
-                return totalCPS;
+                return totalCPS.toFixed(1);
               })()}
             </p>
           </>
@@ -2142,7 +2286,7 @@ export default function MultiplayerRace3D() {
       
       {/* Countdown Overlay */}
       {countdown !== null && (
-        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+        <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
           <h1 className="text-9xl font-bold text-white animate-pulse" style={{ textShadow: '0 0 40px #00f5ff' }}>
             {countdown === 0 ? 'GO!' : countdown}
           </h1>
