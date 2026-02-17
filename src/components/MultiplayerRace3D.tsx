@@ -9,6 +9,13 @@ const MOVEMENT_COOLDOWN = 50; // milliseconds between reps (minimal delay to all
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
 const CEILING_LEVEL = 15;
+const DIVE_THRESHOLD = 0.15; // Fast downward motion threshold for dive
+const DIVE_DURATION = 500; // Duration of dive gravity boost in ms
+const HEAT_RHYTHM_WINDOW = 0.10; // ±10% timing window for heat multiplier
+const MAX_HEAT_MULTIPLIER = 3;
+const HORIZONTAL_THRESHOLD = 0.03; // Minimum X change for horizontal roll detection
+const MEGA_COOKIE_MOTION_THRESHOLD = 0.20; // Large downward motion for mega cookie smash
+const WIPE_MOTION_THRESHOLD = 0.15; // Horizontal wipe to clear burnt cookie
 
 // Difficulty settings (no time limits, just game mechanics)
 const DIFFICULTY_SETTINGS = {
@@ -180,6 +187,31 @@ export default function MultiplayerRace3D() {
   const [cookieCrumbles, setCookieCrumbles] = useState<Array<{ id: number; x: number; y: number }>>([]);
   const [currentHandY, setCurrentHandY] = useState<number | null>(null);
   
+  // Dive mechanic (Flappy)
+  const [diveActive, setDiveActive] = useState(false);
+  
+  // Cloud sabotage (Flappy)
+  const [cloudOnScreen, setCloudOnScreen] = useState(false);
+  const [cloudSabotagePopup, setCloudSabotagePopup] = useState(false);
+  
+  // Heat multiplier (Cookie)
+  const [heatMultiplier, setHeatMultiplier] = useState(1);
+  const [cookieGlow, setCookieGlow] = useState(false);
+  
+  // Mega cookie event (Cookie)
+  const [megaCookieEvent, setMegaCookieEvent] = useState(false);
+  
+  // Dough rolling phase (Cookie)
+  const [doughPhaseActive, setDoughPhaseActive] = useState(false);
+  const [doughProgress, setDoughProgress] = useState(0);
+  
+  // Burnt cookie sabotage (Cookie)
+  const [burntCookieActive, setBurntCookieActive] = useState(false);
+  const [burntCookiePopup, setBurntCookiePopup] = useState(false);
+  
+  // How-to-play descriptions
+  const [hoveredMode, setHoveredMode] = useState<GameMode | null>(null);
+  
   const containerRef = useRef<HTMLDivElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -227,6 +259,19 @@ export default function MultiplayerRace3D() {
   const lastRepTimeRef = useRef<number>(0);
   const handPositionRef = useRef<'up' | 'down' | null>(null);
   const peakHandYRef = useRef<number | null>(null); // Track highest/lowest point for movement detection
+  
+  // New mechanic refs
+  const lastRepTimingsRef = useRef<number[]>([]); // Track timing between reps for heat multiplier
+  const lastHandXRef = useRef<number | null>(null); // Track horizontal hand position
+  const horizontalRollCountRef = useRef(0); // Count horizontal rolls during dough phase
+  const diveTimerRef = useRef<NodeJS.Timeout | null>(null); // Timer for dive duration
+  const diveActiveRef = useRef(false); // Ref version for game loop access
+  const heatMultiplierRef = useRef(1); // Ref version for game loop access
+  const megaCookieEventRef = useRef(false);
+  const doughPhaseActiveRef = useRef(false);
+  const burntCookieActiveRef = useRef(false);
+  const burntCookiePopupRef = useRef(false);
+  const cloudSabotagePopupRef = useRef(false);
 
   // Init Socket.io
   useEffect(() => {
@@ -468,6 +513,20 @@ export default function MultiplayerRace3D() {
       }
     });
 
+    // Cloud sabotage: opponent threw a cloud at us
+    newSocket.on('cloud-hit', () => {
+      console.log('☁️ Cloud hit! View obscured for 3 seconds');
+      setCloudOnScreen(true);
+      setTimeout(() => setCloudOnScreen(false), 3000);
+    });
+
+    // Burnt cookie sabotage: opponent threw a burnt cookie at us
+    newSocket.on('burnt-cookie-hit', () => {
+      console.log('🔥 Burnt cookie hit! CPS halved until wiped');
+      setBurntCookieActive(true);
+      burntCookieActiveRef.current = true;
+    });
+
     newSocket.on('error', (msg) => {
       console.error('Socket error:', msg);
       setError(msg);
@@ -478,6 +537,7 @@ export default function MultiplayerRace3D() {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (readyTimeoutRef.current) clearTimeout(readyTimeoutRef.current);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (diveTimerRef.current) clearTimeout(diveTimerRef.current);
       newSocket.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -496,6 +556,11 @@ export default function MultiplayerRace3D() {
             totalCPS += upgrade.cps * count;
           }
         });
+
+        // Apply burnt cookie penalty: halve CPS
+        if (burntCookieActive) {
+          totalCPS *= 0.5;
+        }
 
         if (totalCPS > 0) {
           const newCookies = prevCookies + totalCPS;
@@ -516,7 +581,7 @@ export default function MultiplayerRace3D() {
     }, 1000); // Run every second
 
     return () => clearInterval(cpsInterval);
-  }, [gameMode, gameState, ownedUpgrades]);
+  }, [gameMode, gameState, ownedUpgrades, burntCookieActive]);
 
   // Sync gameModeRef with gameMode state for use in game loop closures
   useEffect(() => {
@@ -527,6 +592,75 @@ export default function MultiplayerRace3D() {
   useEffect(() => {
     ownedUpgradesRef.current = ownedUpgrades;
   }, [ownedUpgrades]);
+
+  // Sync new mechanic refs with state
+  useEffect(() => { diveActiveRef.current = diveActive; }, [diveActive]);
+  useEffect(() => { heatMultiplierRef.current = heatMultiplier; }, [heatMultiplier]);
+  useEffect(() => { megaCookieEventRef.current = megaCookieEvent; }, [megaCookieEvent]);
+  useEffect(() => { doughPhaseActiveRef.current = doughPhaseActive; }, [doughPhaseActive]);
+  useEffect(() => { burntCookieActiveRef.current = burntCookieActive; }, [burntCookieActive]);
+  useEffect(() => { cloudSabotagePopupRef.current = cloudSabotagePopup; }, [cloudSabotagePopup]);
+  useEffect(() => { burntCookiePopupRef.current = burntCookiePopup; }, [burntCookiePopup]);
+
+  // Random event system - triggers special events during gameplay
+  useEffect(() => {
+    if (gameState !== 'racing' || !isGameRunningRef.current) return;
+
+    const eventInterval = setInterval(() => {
+      if (!isGameRunningRef.current || gameOverRef.current) return;
+      
+      const roll = Math.random();
+      
+      if (gameModeRef.current === 'race') {
+        // Cloud sabotage popup (15% chance every 8 seconds)
+        if (roll < 0.15 && !cloudSabotagePopupRef.current) {
+          setCloudSabotagePopup(true);
+          // Auto-dismiss after 3 seconds if not acted upon
+          setTimeout(() => setCloudSabotagePopup(false), 3000);
+        }
+      } else if (gameModeRef.current === 'clicker') {
+        if (roll < 0.10 && !megaCookieEventRef.current && !doughPhaseActiveRef.current) {
+          // Mega cookie event (10% chance)
+          setMegaCookieEvent(true);
+          megaCookieEventRef.current = true;
+          // Auto-dismiss after 4 seconds
+          setTimeout(() => {
+            setMegaCookieEvent(false);
+            megaCookieEventRef.current = false;
+          }, 4000);
+        } else if (roll < 0.18 && !doughPhaseActiveRef.current && !megaCookieEventRef.current) {
+          // Dough phase (8% chance)
+          setDoughPhaseActive(true);
+          doughPhaseActiveRef.current = true;
+          setDoughProgress(0);
+          horizontalRollCountRef.current = 0;
+          // Auto-end after 6 seconds
+          setTimeout(() => {
+            setDoughPhaseActive(false);
+            doughPhaseActiveRef.current = false;
+            setDoughProgress(0);
+          }, 6000);
+        } else if (roll < 0.25 && !burntCookiePopupRef.current && players.length > 1) {
+          // Burnt cookie sabotage popup (7% chance, only in multiplayer)
+          setBurntCookiePopup(true);
+          burntCookiePopupRef.current = true;
+          setTimeout(() => {
+            setBurntCookiePopup(false);
+            burntCookiePopupRef.current = false;
+          }, 3000);
+        }
+      }
+    }, 8000); // Check every 8 seconds
+
+    return () => clearInterval(eventInterval);
+  }, [gameState, players.length]);
+
+  // Apply burnt cookie CPS penalty
+  useEffect(() => {
+    if (!burntCookieActive) return;
+    // The CPS calculation already checks burntCookieActive to halve CPS
+    // This effect just ensures the state is tracked
+  }, [burntCookieActive]);
 
   // Three.js setup
   useEffect(() => {
@@ -888,16 +1022,91 @@ export default function MultiplayerRace3D() {
       const hand = results.landmarks[0];
       const wrist = hand[0];
       const handY = wrist.y;
+      const handX = wrist.x;
       const now = Date.now();
       
       // Update state for UI indicator IMMEDIATELY
       setCurrentHandY(handY);
-      console.log('💾 State updated! handY =', handY.toFixed(3), '| Landmarks:', hand.length);
       
-      console.log('🎯 Hand Y:', handY.toFixed(3), '| Last:', lastHandYRef.current?.toFixed(3), '| Direction:', handPositionRef.current, '| Peak:', peakHandYRef.current?.toFixed(3));
+      // === FIST DETECTION (for cloud sabotage in race mode) ===
+      // Check if all fingertips are curled toward palm (fist gesture)
+      // Fingertips: 8(index), 12(middle), 16(ring), 20(pinky)
+      // MCP joints: 5(index), 9(middle), 13(ring), 17(pinky)
+      if (hand.length >= 21) {
+        const fingertips = [hand[8], hand[12], hand[16], hand[20]];
+        const mcpJoints = [hand[5], hand[9], hand[13], hand[17]];
+        const isFist = fingertips.every((tip, i) => tip.y > mcpJoints[i].y);
+        
+        // Handle cloud sabotage: if popup is active and fist detected, throw cloud
+        if (isFist && cloudSabotagePopupRef.current && gameModeRef.current === 'race') {
+          console.log('👊 FIST DETECTED! Throwing cloud at opponent!');
+          setCloudSabotagePopup(false);
+          cloudSabotagePopupRef.current = false;
+          if (socketRef.current && roomCodeRef.current) {
+            socketRef.current.emit('throw-cloud', { roomCode: roomCodeRef.current });
+          }
+        }
+        
+        // Handle burnt cookie sabotage: if popup is active and fist detected, throw burnt cookie
+        if (isFist && burntCookiePopupRef.current && gameModeRef.current === 'clicker') {
+          console.log('👊 FIST! Throwing burnt cookie at opponent!');
+          setBurntCookiePopup(false);
+          burntCookiePopupRef.current = false;
+          if (socketRef.current && roomCodeRef.current) {
+            socketRef.current.emit('throw-burnt-cookie', { roomCode: roomCodeRef.current });
+          }
+        }
+      }
       
+      // === HORIZONTAL MOVEMENT TRACKING (for dough rolling + burnt cookie wiping) ===
+      if (lastHandXRef.current !== null) {
+        const deltaX = handX - lastHandXRef.current;
+        
+        // Dough rolling: track horizontal motion during dough phase
+        if (doughPhaseActiveRef.current && Math.abs(deltaX) > HORIZONTAL_THRESHOLD) {
+          horizontalRollCountRef.current++;
+          const progress = Math.min(100, horizontalRollCountRef.current * 5);
+          setDoughProgress(progress);
+          
+          // Award massive CPS bonus for rolling
+          if (horizontalRollCountRef.current % 3 === 0) {
+            setCookies(prev => {
+              let totalCPS = 0;
+              ownedUpgradesRef.current.forEach((count, upgradeId) => {
+                const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+                  totalCPS += upgrade.cps * count;
+                }
+              });
+              const bonus = Math.max(5, totalCPS * 2);
+              const newCookies = prev + bonus;
+              setMyScore(newCookies);
+              if (socketRef.current && roomCodeRef.current) {
+                socketRef.current.emit('update-score', { roomCode: roomCodeRef.current, score: newCookies });
+              }
+              return newCookies;
+            });
+          }
+          
+          // Complete dough phase at 100%
+          if (progress >= 100) {
+            setDoughPhaseActive(false);
+            doughPhaseActiveRef.current = false;
+            setDoughProgress(0);
+          }
+        }
+        
+        // Burnt cookie wiping: horizontal wipe motion clears burnt cookie
+        if (burntCookieActiveRef.current && Math.abs(deltaX) > WIPE_MOTION_THRESHOLD) {
+          console.log('🧹 Wiped burnt cookie away!');
+          setBurntCookieActive(false);
+          burntCookieActiveRef.current = false;
+        }
+      }
+      lastHandXRef.current = handX;
+      
+      // === VERTICAL MOVEMENT TRACKING (standard rep detection + dive) ===
       // Track directional movement (up = Y decreasing, down = Y increasing)
-      // Initialize on first detection
       if (lastHandYRef.current === null) {
         lastHandYRef.current = handY;
         peakHandYRef.current = handY;
@@ -905,43 +1114,106 @@ export default function MultiplayerRace3D() {
       } else {
         const deltaY = handY - lastHandYRef.current;
         
-        // Initialize peak if not set
         if (peakHandYRef.current === null) {
           peakHandYRef.current = handY;
         }
         
-        // Detect significant upward movement (Y decreasing)
-        if (deltaY < -0.005) { // Moving up (smaller threshold for smoother detection)
-          // If we were going down and now moved up significantly, just track state (no rep counted)
+        // === DIVE DETECTION (Flappy mode) ===
+        // If downward deltaY exceeds DIVE_THRESHOLD in a single frame, trigger dive
+        if (gameModeRef.current === 'race' && deltaY > DIVE_THRESHOLD && !diveActiveRef.current) {
+          console.log('🦅 DIVE DETECTED! deltaY:', deltaY.toFixed(3));
+          setDiveActive(true);
+          diveActiveRef.current = true;
+          // Clear any existing dive timer
+          if (diveTimerRef.current) clearTimeout(diveTimerRef.current);
+          diveTimerRef.current = setTimeout(() => {
+            setDiveActive(false);
+            diveActiveRef.current = false;
+          }, DIVE_DURATION);
+        }
+        
+        // Detect upward movement (Y decreasing)
+        if (deltaY < -0.005) {
           if (handPositionRef.current === 'down' && peakHandYRef.current !== null && (peakHandYRef.current - handY) > MOVEMENT_THRESHOLD) {
-            console.log('⬆️ Hand moved UP (preparing for down stroke)');
             handPositionRef.current = 'up';
             peakHandYRef.current = handY;
           } else {
-            // Still moving up, update peak
             peakHandYRef.current = Math.min(peakHandYRef.current, handY);
             if (handPositionRef.current === null) {
               handPositionRef.current = 'up';
             }
           }
         }
-        // Detect significant downward movement (Y increasing)
-        else if (deltaY > 0.005) { // Moving down
-          // If we were going up and now moved down significantly from that high point, count a rep (ONLY DOWN COUNTS!)
+        // Detect downward movement (Y increasing)
+        else if (deltaY > 0.005) {
           if (handPositionRef.current === 'up' && peakHandYRef.current !== null && (handY - peakHandYRef.current) > MOVEMENT_THRESHOLD) {
             const timeSinceLastRep = now - lastRepTimeRef.current;
             
             if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
-              console.log('🎉 REP COMPLETED! ⬇️ DOWN STROKE = COOKIE! Moved', (handY - peakHandYRef.current).toFixed(3));
+              const movementMagnitude = handY - peakHandYRef.current;
               lastRepTimeRef.current = now;
               handPositionRef.current = 'down';
               peakHandYRef.current = handY;
               
-              // Count the rep
+              // === HEAT MULTIPLIER: track rep rhythm ===
               if (gameModeRef.current === 'clicker') {
+                const timings = lastRepTimingsRef.current;
+                timings.push(timeSinceLastRep);
+                if (timings.length > 5) timings.shift(); // Keep last 5 timings
+                
+                // Check rhythm consistency
+                if (timings.length >= 3) {
+                  const avgTiming = timings.reduce((a, b) => a + b, 0) / timings.length;
+                  const allInWindow = timings.every(t => Math.abs(t - avgTiming) / avgTiming <= HEAT_RHYTHM_WINDOW);
+                  
+                  if (allInWindow) {
+                    setHeatMultiplier(prev => {
+                      const newHeat = Math.min(MAX_HEAT_MULTIPLIER, prev + 0.2);
+                      heatMultiplierRef.current = newHeat;
+                      setCookieGlow(newHeat >= 1.5);
+                      return newHeat;
+                    });
+                  } else {
+                    setHeatMultiplier(prev => {
+                      const newHeat = Math.max(1, prev - 0.3);
+                      heatMultiplierRef.current = newHeat;
+                      setCookieGlow(newHeat >= 1.5);
+                      return newHeat;
+                    });
+                  }
+                }
+                
+                // === MEGA COOKIE EVENT: check for large downward motion ===
+                if (megaCookieEventRef.current && movementMagnitude > MEGA_COOKIE_MOTION_THRESHOLD) {
+                  console.log('💥 MEGA COOKIE SMASH! Movement:', movementMagnitude.toFixed(3));
+                  setMegaCookieEvent(false);
+                  megaCookieEventRef.current = false;
+                  
+                  // Award 100x current click power
+                  setCookies(prevCookies => {
+                    let clickMultiplier = 1;
+                    ownedUpgradesRef.current.forEach((count, upgradeId) => {
+                      const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                      if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                        clickMultiplier *= Math.pow(upgrade.multiplier, count);
+                      }
+                    });
+                    const megaBonus = Math.floor(clickMultiplier * 100);
+                    const newCookies = prevCookies + megaBonus;
+                    setMyScore(newCookies);
+                    if (socketRef.current && roomCodeRef.current) {
+                      socketRef.current.emit('update-score', { roomCode: roomCodeRef.current, score: newCookies });
+                    }
+                    return newCookies;
+                  });
+                }
+              }
+              
+              // Count the rep (skip if in dough phase - dough phase uses horizontal motion)
+              if (gameModeRef.current === 'clicker' && !doughPhaseActiveRef.current) {
                 setClickCount(prev => prev + 1);
                 
-                // Calculate cookies earned
+                // Calculate cookies earned (with heat multiplier and burnt cookie penalty)
                 setCookies(prevCookies => {
                   let multiplier = 1;
                   ownedUpgradesRef.current.forEach((count, upgradeId) => {
@@ -951,9 +1223,16 @@ export default function MultiplayerRace3D() {
                     }
                   });
                   
+                  // Apply heat multiplier
+                  multiplier *= heatMultiplierRef.current;
+                  
+                  // Apply burnt cookie penalty
+                  if (burntCookieActiveRef.current) {
+                    multiplier *= 0.5;
+                  }
+                  
                   const cookiesEarned = Math.floor(multiplier);
                   const newCookies = prevCookies + cookiesEarned;
-                  console.log('💰 Multiplier:', multiplier, '| Cookies earned:', cookiesEarned, '| Total:', newCookies);
                   
                   setMyScore(newCookies);
                   if (socketRef.current && roomCodeRef.current) {
@@ -963,7 +1242,6 @@ export default function MultiplayerRace3D() {
                     });
                   }
                   
-                  // Trigger cookie crumble animation
                   const crumbleId = Date.now();
                   setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
                   setTimeout(() => {
@@ -975,11 +1253,8 @@ export default function MultiplayerRace3D() {
               } else if (gameModeRef.current === 'race') {
                 birdVelocityRef.current = flapStrengthRef.current;
               }
-            } else {
-              console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
             }
           } else {
-            // Still moving down, update peak
             peakHandYRef.current = Math.max(peakHandYRef.current, handY);
             if (handPositionRef.current === null) {
               handPositionRef.current = 'down';
@@ -1007,7 +1282,9 @@ export default function MultiplayerRace3D() {
       
       // Bird physics - only in race mode
       if (gameModeRef.current === 'race' && birdRef.current) {
-        birdVelocityRef.current += gravityRef.current * timeScale;
+        // Apply dive modifier: double gravity when dive is active
+        const gravityMultiplier = diveActiveRef.current ? 2.0 : 1.0;
+        birdVelocityRef.current += gravityRef.current * gravityMultiplier * timeScale;
         birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
         birdRef.current.position.y = birdYRef.current;
         birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
@@ -1354,69 +1631,127 @@ export default function MultiplayerRace3D() {
     return (
       <div className="flex min-h-screen w-full bg-black text-white flex-col items-center justify-center p-4">
         <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
-          Hand Gesture Multiplayer
+          GoonyClicker
         </h1>
-        <p className="text-xl text-gray-400 mb-12">Move your hand to play!</p>
+        <p className="text-xl text-gray-400 mb-12">Motion-controlled multiplayer games!</p>
         
-        <div className="max-w-md w-full space-y-6">
-          <input
-            type="text"
-            placeholder="Enter your name"
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none focus:border-pink-500"
-          />
-          
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Game Mode</label>
-            <select
-              value={gameMode}
-              onChange={(e) => setGameMode(e.target.value as GameMode)}
-              className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
-            >
-              <option value="race">🐦 Flappy Bird Race</option>
-              <option value="clicker">🍪 Cookie Clicker</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-              className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
-            >
-              <option value="easy">Easy (Slower, Easier)</option>
-              <option value="medium">Medium (Normal)</option>
-              <option value="hard">Hard (Faster, Harder)</option>
-            </select>
-          </div>
-          
-          <button
-            onClick={createRoom}
-            className="w-full px-6 py-4 bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-500 hover:to-pink-500 text-white font-bold rounded-lg transition-all uppercase"
-          >
-            Create Room
-          </button>
-          
-          <div className="flex gap-2">
+        <div className="max-w-2xl w-full flex gap-8">
+          {/* Left: Game Settings */}
+          <div className="flex-1 space-y-6">
             <input
               type="text"
-              placeholder="Room Code"
-              value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-              maxLength={6}
-              className="flex-1 px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white uppercase focus:outline-none"
+              placeholder="Enter your name"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none focus:border-pink-500"
             />
+            
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Game Mode</label>
+              <div className="space-y-2">
+                <button
+                  onClick={() => { setGameMode('race'); setHoveredMode('race'); }}
+                  onMouseEnter={() => setHoveredMode('race')}
+                  className={`w-full px-4 py-3 rounded-lg text-left font-bold transition-all ${
+                    gameMode === 'race' 
+                      ? 'bg-cyan-600 border-2 border-cyan-300 text-white' 
+                      : 'bg-gray-900 border-2 border-gray-700 text-gray-300 hover:border-cyan-500'
+                  }`}
+                >
+                  🐦 Flappy Bird Race
+                </button>
+                <button
+                  onClick={() => { setGameMode('clicker'); setHoveredMode('clicker'); }}
+                  onMouseEnter={() => setHoveredMode('clicker')}
+                  className={`w-full px-4 py-3 rounded-lg text-left font-bold transition-all ${
+                    gameMode === 'clicker' 
+                      ? 'bg-pink-600 border-2 border-pink-300 text-white' 
+                      : 'bg-gray-900 border-2 border-gray-700 text-gray-300 hover:border-pink-500'
+                  }`}
+                >
+                  🍪 Cookie Clicker
+                </button>
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Difficulty</label>
+              <select
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                className="w-full px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white focus:outline-none"
+              >
+                <option value="easy">Easy (Slower, Easier)</option>
+                <option value="medium">Medium (Normal)</option>
+                <option value="hard">Hard (Faster, Harder)</option>
+              </select>
+            </div>
+            
             <button
-              onClick={joinRoom}
-              className="px-6 py-3 bg-gradient-to-r from-pink-600 to-cyan-600 hover:from-pink-500 hover:to-cyan-500 text-white font-bold rounded-lg transition-all uppercase"
+              onClick={createRoom}
+              className="w-full px-6 py-4 bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-500 hover:to-pink-500 text-white font-bold rounded-lg transition-all uppercase"
             >
-              Join
+              Create Room
             </button>
+            
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Room Code"
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                maxLength={6}
+                className="flex-1 px-4 py-3 bg-gray-900 border-2 border-cyan-500 rounded-lg text-white uppercase focus:outline-none"
+              />
+              <button
+                onClick={joinRoom}
+                className="px-6 py-3 bg-gradient-to-r from-pink-600 to-cyan-600 hover:from-pink-500 hover:to-cyan-500 text-white font-bold rounded-lg transition-all uppercase"
+              >
+                Join
+              </button>
+            </div>
+            
+            {error && <p className="text-red-500 text-center">{error}</p>}
           </div>
           
-          {error && <p className="text-red-500 text-center">{error}</p>}
+          {/* Right: How to Play description */}
+          <div className="flex-1">
+            <div className="bg-gray-900 border-2 border-gray-700 rounded-lg p-6 h-full">
+              <h2 className="text-xl font-bold mb-4 text-cyan-400">📖 How to Play</h2>
+              {(hoveredMode || gameMode) === 'race' ? (
+                <div className="space-y-3 text-sm">
+                  <p className="text-white font-bold text-lg">🐦 Flappy Bird Race</p>
+                  <div className="border-l-2 border-cyan-500 pl-3">
+                    <p className="text-gray-300 mb-1"><strong>Flap:</strong> Move hand up then down to flap</p>
+                    <p className="text-gray-300 mb-1"><strong>Dive:</strong> Fast downward hand flick for rapid descent</p>
+                    <p className="text-gray-300 mb-1"><strong>Sabotage:</strong> Make a FIST when prompted to throw clouds at opponents!</p>
+                  </div>
+                  <div className="mt-4 p-3 bg-gray-800 rounded-lg">
+                    <p className="text-yellow-400 text-xs font-bold">SPECIAL MECHANICS</p>
+                    <p className="text-gray-400 text-xs mt-1">⚡ Dive through tight gaps with the fast-flick mechanic</p>
+                    <p className="text-gray-400 text-xs">☁️ Throw clouds to block opponents&apos; view for 3 seconds</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 text-sm">
+                  <p className="text-white font-bold text-lg">🍪 Cookie Clicker</p>
+                  <div className="border-l-2 border-pink-500 pl-3">
+                    <p className="text-gray-300 mb-1"><strong>Click:</strong> Move hand up then down to earn cookies</p>
+                    <p className="text-gray-300 mb-1"><strong>Smash:</strong> Large downward motion during MEGA COOKIE event for 100x bonus</p>
+                    <p className="text-gray-300 mb-1"><strong>Roll:</strong> Move hand left/right during Dough Phase for massive CPS</p>
+                    <p className="text-gray-300 mb-1"><strong>Wipe:</strong> Horizontal swipe to clear Burnt Cookies</p>
+                  </div>
+                  <div className="mt-4 p-3 bg-gray-800 rounded-lg">
+                    <p className="text-yellow-400 text-xs font-bold">SPECIAL MECHANICS</p>
+                    <p className="text-gray-400 text-xs mt-1">🔥 Keep a rhythm for Heat Multiplier (up to 3x!)</p>
+                    <p className="text-gray-400 text-xs">💥 MEGA COOKIE: Smash for 100x Click-Power</p>
+                    <p className="text-gray-400 text-xs">🫘 Dough Phase: Roll left/right for bonus cookies</p>
+                    <p className="text-gray-400 text-xs">🔥 Throw Burnt Cookies to halve opponent&apos;s CPS</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1498,6 +1833,36 @@ export default function MultiplayerRace3D() {
     <div className="relative min-h-screen w-full bg-black flex items-center justify-center">
       <video ref={videoRef} autoPlay playsInline style={{ position: 'absolute', left: '-9999px', width: '480px', height: '480px' }} />
       
+      {/* === IN-GAME HUD CONTROLS === */}
+      <div className="absolute top-0 left-0 right-0 z-30 flex justify-center pointer-events-none">
+        <div className="mt-2 px-6 py-2 rounded-b-lg text-center" style={{
+          background: 'rgba(0, 0, 0, 0.55)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(0, 245, 255, 0.3)',
+          borderTop: 'none'
+        }}>
+          {gameMode === 'race' ? (
+            <p className="text-sm text-cyan-300 font-mono">
+              <span className="text-white font-bold">Flap</span> (Hand Up/Down)
+              <span className="mx-2 text-gray-500">|</span>
+              <span className="text-white font-bold">Dive</span> (Fast Downward Flick)
+              {diveActive && <span className="ml-2 text-red-400 animate-pulse font-bold">⚡ DIVING</span>}
+            </p>
+          ) : (
+            <p className="text-sm text-pink-300 font-mono">
+              <span className="text-white font-bold">Click</span> (Hand Up/Down)
+              <span className="mx-2 text-gray-500">|</span>
+              <span className="text-white font-bold">Smash</span> (Large Downward Motion)
+              <span className="mx-2 text-gray-500">|</span>
+              <span className="text-white font-bold">Roll</span> (Left/Right)
+              {heatMultiplier > 1 && (
+                <span className="ml-2 text-orange-400 font-bold">🔥 {heatMultiplier.toFixed(1)}x Heat</span>
+              )}
+            </p>
+          )}
+        </div>
+      </div>
+      
       {/* Game Canvas - Only for race mode */}
       {gameMode === 'race' && (
         <div ref={containerRef} className="border-4 border-cyan-500" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }} />
@@ -1508,16 +1873,68 @@ export default function MultiplayerRace3D() {
         <div className="flex flex-col items-center justify-center">
           <div className="text-center mb-8">
             <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
-              🍪 Cookie Clicker
+              {doughPhaseActive ? '🫘 Rolling Dough!' : '🍪 Cookie Clicker'}
             </h1>
-            <p className="text-3xl text-cyan-400 mb-2">Move your hand up to click!</p>
+            <p className="text-3xl text-cyan-400 mb-2">
+              {doughPhaseActive ? 'Move hand LEFT/RIGHT to roll!' : 'Move your hand up & down to click!'}
+            </p>
           </div>
           
-          <div className="bg-gray-900 border-4 border-cyan-500 rounded-lg p-12 mb-8" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }}>
+          <div className="bg-gray-900 border-4 rounded-lg p-12 mb-8 relative" style={{
+            borderColor: cookieGlow ? '#ff6600' : '#06b6d4',
+            boxShadow: cookieGlow 
+              ? '0 0 40px rgba(255, 102, 0, 0.7), 0 0 80px rgba(255, 60, 0, 0.3)' 
+              : '0 0 30px rgba(0, 245, 255, 0.5)',
+            transition: 'border-color 0.3s, box-shadow 0.3s'
+          }}>
             <div className="text-center">
-              <div className="text-9xl mb-4 animate-pulse">🍪</div>
+              {/* Cookie / Dough display */}
+              {doughPhaseActive ? (
+                <div>
+                  <div className="text-9xl mb-4">🫘</div>
+                  <div className="w-full bg-gray-700 rounded-full h-6 mb-4">
+                    <div 
+                      className="h-6 rounded-full transition-all duration-200" 
+                      style={{ 
+                        width: `${doughProgress}%`, 
+                        background: 'linear-gradient(to right, #f59e0b, #ef4444)' 
+                      }}
+                    />
+                  </div>
+                  <p className="text-2xl text-yellow-400 font-bold">{doughProgress}% Rolled</p>
+                </div>
+              ) : (
+                <div className="text-9xl mb-4" style={{
+                  filter: cookieGlow ? 'drop-shadow(0 0 20px rgba(255, 100, 0, 0.8))' : 'none',
+                  animation: cookieGlow ? 'pulse 0.5s infinite' : megaCookieEvent ? 'pulse 0.3s infinite' : 'pulse 2s infinite',
+                  transform: megaCookieEvent ? 'scale(1.3)' : 'scale(1)',
+                  transition: 'transform 0.3s'
+                }}>
+                  {megaCookieEvent ? '🌟' : '🍪'}
+                </div>
+              )}
               <p className="text-6xl font-bold text-cyan-400 mb-2">{Math.floor(cookies)}</p>
-              <p className="text-2xl text-gray-400 mb-4">Cookies</p>
+              <p className="text-2xl text-gray-400 mb-2">Cookies</p>
+              
+              {/* Heat Multiplier Bar */}
+              {heatMultiplier > 1 && (
+                <div className="mb-2">
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-orange-400 font-bold">🔥 HEAT</span>
+                    <div className="w-32 bg-gray-700 rounded-full h-3">
+                      <div 
+                        className="h-3 rounded-full transition-all duration-300"
+                        style={{ 
+                          width: `${((heatMultiplier - 1) / (MAX_HEAT_MULTIPLIER - 1)) * 100}%`,
+                          background: `linear-gradient(to right, #f59e0b, #ef4444)`
+                        }}
+                      />
+                    </div>
+                    <span className="text-orange-300 font-bold text-sm">{heatMultiplier.toFixed(1)}x</span>
+                  </div>
+                </div>
+              )}
+              
               <p className="text-3xl text-yellow-400 font-bold">
                 {(() => {
                   let totalCPS = 0;
@@ -1527,8 +1944,10 @@ export default function MultiplayerRace3D() {
                       totalCPS += upgrade.cps * count;
                     }
                   });
-                  return totalCPS;
+                  if (burntCookieActive) totalCPS *= 0.5;
+                  return Math.floor(totalCPS);
                 })()} CPS
+                {burntCookieActive && <span className="text-red-400 text-lg ml-2">(🔥 Burnt! -50%)</span>}
               </p>
               
               {/* Hand Position Indicator */}
@@ -1536,25 +1955,11 @@ export default function MultiplayerRace3D() {
                 <p className="text-sm text-gray-500 mb-1">Hand Tracking Status</p>
                 <p className="text-2xl font-bold">
                   {currentHandY !== null ? (
-                    <>
-                      <span className="text-green-400">✅ Tracking</span>
-                      <span className="text-sm text-gray-500 ml-2">
-                        (Y: {currentHandY.toFixed(2)})
-                      </span>
-                    </>
+                    <span className="text-green-400">✅ Tracking</span>
                   ) : (
                     <span className="text-red-400">❌ Not Detected</span>
                   )}
                 </p>
-                <div className="text-xs text-gray-500 mt-2 bg-gray-800 p-2 rounded">
-                  <p className="mb-1">💡 <b>Tips for best tracking:</b></p>
-                  <ul className="list-disc list-inside text-left space-y-1">
-                    <li>Show your full hand to the camera</li>
-                    <li>Ensure good lighting on your hand</li>
-                    <li>Move hand UP and DOWN to count reps</li>
-                    <li>Each complete up/down motion = 1 rep</li>
-                  </ul>
-                </div>
               </div>
             </div>
           </div>
@@ -1770,6 +2175,96 @@ export default function MultiplayerRace3D() {
               Retry
             </button>
           )}
+        </div>
+      )}
+      
+      {/* === CLOUD INTERFERENCE OVERLAY (Flappy Bird) === */}
+      {cloudOnScreen && (
+        <div className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center" style={{ animation: 'fadeIn 0.3s' }}>
+          {/* SVG Cloud that obscures part of the screen */}
+          <svg width="100%" height="100%" viewBox="0 0 800 600" style={{ opacity: 0.85 }}>
+            <defs>
+              <filter id="cloudBlur">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3" />
+              </filter>
+            </defs>
+            <g filter="url(#cloudBlur)">
+              <ellipse cx="400" cy="200" rx="300" ry="120" fill="white" opacity="0.9" />
+              <ellipse cx="300" cy="180" rx="150" ry="100" fill="white" opacity="0.9" />
+              <ellipse cx="500" cy="180" rx="160" ry="90" fill="white" opacity="0.9" />
+              <ellipse cx="350" cy="280" rx="250" ry="80" fill="white" opacity="0.85" />
+              <ellipse cx="400" cy="350" rx="200" ry="60" fill="white" opacity="0.7" />
+            </g>
+          </svg>
+          <p className="absolute top-1/2 text-4xl font-bold text-gray-700 animate-pulse" style={{ textShadow: '0 0 10px white' }}>
+            ☁️ CLOUD ATTACK! ☁️
+          </p>
+        </div>
+      )}
+      
+      {/* === CLOUD SABOTAGE POPUP (Flappy Bird) === */}
+      {cloudSabotagePopup && gameMode === 'race' && (
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 border-4 border-white rounded-2xl px-8 py-6 text-center" 
+               style={{ boxShadow: '0 0 40px rgba(99, 102, 241, 0.8)' }}>
+            <p className="text-3xl font-bold text-white mb-2">☁️ QUICK!</p>
+            <p className="text-xl text-blue-200">Make a <span className="text-yellow-300 font-bold">FIST</span> to throw a Cloud!</p>
+            <p className="text-sm text-blue-300 mt-2 animate-pulse">👊 Close your hand NOW!</p>
+          </div>
+        </div>
+      )}
+      
+      {/* === MEGA COOKIE EVENT POPUP === */}
+      {megaCookieEvent && gameMode === 'clicker' && (
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-gradient-to-r from-yellow-500 to-red-500 border-4 border-yellow-300 rounded-2xl px-8 py-6 text-center"
+               style={{ boxShadow: '0 0 60px rgba(234, 179, 8, 0.9)' }}>
+            <p className="text-4xl font-bold text-white mb-2">🌟 MEGA COOKIE! 🌟</p>
+            <p className="text-xl text-yellow-100"><span className="text-white font-bold">SMASH NOW!</span> Big downward motion for <span className="text-yellow-300 font-bold">100x</span> Click-Power!</p>
+            <p className="text-sm text-yellow-200 mt-2 animate-pulse">💥 Quick! Move hand DOWN hard!</p>
+          </div>
+        </div>
+      )}
+      
+      {/* === BURNT COOKIE SABOTAGE POPUP === */}
+      {burntCookiePopup && gameMode === 'clicker' && (
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-gradient-to-r from-red-700 to-orange-600 border-4 border-red-400 rounded-2xl px-8 py-6 text-center"
+               style={{ boxShadow: '0 0 40px rgba(220, 38, 38, 0.8)' }}>
+            <p className="text-3xl font-bold text-white mb-2">🔥 SABOTAGE!</p>
+            <p className="text-xl text-red-200">Make a <span className="text-yellow-300 font-bold">FIST</span> to throw a Burnt Cookie!</p>
+            <p className="text-sm text-red-300 mt-2 animate-pulse">👊 Close your hand to sabotage opponent!</p>
+          </div>
+        </div>
+      )}
+      
+      {/* === BURNT COOKIE OVERLAY (received sabotage) === */}
+      {burntCookieActive && gameMode === 'clicker' && (
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none">
+          <div className="relative">
+            <svg width="180" height="180" viewBox="0 0 180 180">
+              <circle cx="90" cy="90" r="80" fill="#2d1b0e" stroke="#4a2c0a" strokeWidth="4" />
+              <circle cx="90" cy="90" r="65" fill="#1a0f06" opacity="0.7" />
+              {/* Smoke wisps */}
+              <path d="M60 40 Q70 20 80 35 Q90 15 95 30" fill="none" stroke="gray" strokeWidth="2" opacity="0.6">
+                <animate attributeName="d" values="M60 40 Q70 20 80 35 Q90 15 95 30;M55 35 Q65 10 85 30 Q95 5 100 25;M60 40 Q70 20 80 35 Q90 15 95 30" dur="2s" repeatCount="indefinite" />
+              </path>
+              <path d="M100 45 Q110 25 115 40" fill="none" stroke="gray" strokeWidth="2" opacity="0.5">
+                <animate attributeName="d" values="M100 45 Q110 25 115 40;M95 40 Q108 15 120 35;M100 45 Q110 25 115 40" dur="1.8s" repeatCount="indefinite" />
+              </path>
+            </svg>
+            <p className="text-center text-red-400 font-bold text-sm mt-1 animate-pulse">🔥 Burnt Cookie! Wipe to clear! →</p>
+            <p className="text-center text-red-300 text-xs">CPS halved! Swipe hand LEFT/RIGHT</p>
+          </div>
+        </div>
+      )}
+      
+      {/* === DIVE INDICATOR (Flappy Bird) === */}
+      {diveActive && gameMode === 'race' && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none">
+          <div className="bg-red-600 bg-opacity-80 rounded-full px-6 py-2 animate-pulse">
+            <p className="text-white font-bold text-lg">⚡ DIVING ⚡</p>
+          </div>
         </div>
       )}
     </div>

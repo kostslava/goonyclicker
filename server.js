@@ -240,6 +240,26 @@ app.prepare().then(() => {
       socket.to(roomCode).emit('opponent-flap');
     });
 
+    // Cloud sabotage - throw cloud at opponent (Flappy Bird mode)
+    socket.on('throw-cloud', ({ roomCode }) => {
+      console.log(`Cloud thrown by ${socket.id} in room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Send cloud hit to all other players in the room
+      socket.to(roomCode).emit('cloud-hit');
+    });
+
+    // Burnt cookie sabotage - throw burnt cookie at opponent (Cookie Clicker mode)
+    socket.on('throw-burnt-cookie', ({ roomCode }) => {
+      console.log(`Burnt cookie thrown by ${socket.id} in room ${roomCode}`);
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      // Send burnt cookie hit to all other players in the room
+      socket.to(roomCode).emit('burnt-cookie-hit');
+    });
+
     // WebRTC signaling
     socket.on('webrtc-offer', ({ offer, roomCode }) => {
       console.log(`WebRTC offer from ${socket.id} in room ${roomCode}`);
