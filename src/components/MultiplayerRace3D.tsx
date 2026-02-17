@@ -40,6 +40,103 @@ interface Player {
   score: number;
 }
 
+interface Upgrade {
+  id: string;
+  name: string;
+  baseCost: number;
+  type: 'multiplier' | 'passive';
+  multiplier?: number; // For multiplier upgrades (cookies per click)
+  cps?: number; // For passive upgrades (cookies per second)
+  description: string;
+  icon: string;
+}
+
+const UPGRADES: Upgrade[] = [
+  // Multiplier upgrades
+  {
+    id: 'double_click',
+    name: 'Double Click',
+    baseCost: 10,
+    type: 'multiplier',
+    multiplier: 2,
+    description: '2x cookies per click',
+    icon: '✌️'
+  },
+  {
+    id: 'mega_click',
+    name: 'Mega Click',
+    baseCost: 50,
+    type: 'multiplier',
+    multiplier: 5,
+    description: '5x cookies per click',
+    icon: '💪'
+  },
+  {
+    id: 'ultra_click',
+    name: 'Ultra Click',
+    baseCost: 200,
+    type: 'multiplier',
+    multiplier: 10,
+    description: '10x cookies per click',
+    icon: '⚡'
+  },
+  {
+    id: 'legendary_click',
+    name: 'Legendary Click',
+    baseCost: 1000,
+    type: 'multiplier',
+    multiplier: 50,
+    description: '50x cookies per click',
+    icon: '🔥'
+  },
+  // Passive upgrades
+  {
+    id: 'grandma',
+    name: 'Grandma',
+    baseCost: 15,
+    type: 'passive',
+    cps: 1,
+    description: '+1 cookie/sec',
+    icon: '👵'
+  },
+  {
+    id: 'farm',
+    name: 'Cookie Farm',
+    baseCost: 100,
+    type: 'passive',
+    cps: 8,
+    description: '+8 cookies/sec',
+    icon: '🌾'
+  },
+  {
+    id: 'factory',
+    name: 'Cookie Factory',
+    baseCost: 500,
+    type: 'passive',
+    cps: 50,
+    description: '+50 cookies/sec',
+    icon: '🏭'
+  },
+  {
+    id: 'mine',
+    name: 'Cookie Mine',
+    baseCost: 2000,
+    type: 'passive',
+    cps: 200,
+    description: '+200 cookies/sec',
+    icon: '⛏️'
+  },
+  {
+    id: 'spaceship',
+    name: 'Cookie Spaceship',
+    baseCost: 10000,
+    type: 'passive',
+    cps: 1000,
+    description: '+1000 cookies/sec',
+    icon: '🚀'
+  }
+];
+
 interface Pipe {
   bottom: THREE.Mesh;
   top: THREE.Mesh;
@@ -75,6 +172,10 @@ export default function MultiplayerRace3D() {
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isDead, setIsDead] = useState(false);
+  const [cookies, setCookies] = useState(0);
+  const [ownedUpgrades, setOwnedUpgrades] = useState<Map<string, number>>(new Map());
+  const [showShop, setShowShop] = useState(false);
+  const [showUpgrades, setShowUpgrades] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -170,6 +271,8 @@ export default function MultiplayerRace3D() {
       setAlivePlayers(new Set(players.map((p: Player) => p.id)));
       setIsDead(false);
       setClickCount(0);
+      setCookies(0);
+      setOwnedUpgrades(new Map());
       setError('Initializing camera...');
       
       // Initialize camera and wait for ready signal
@@ -371,6 +474,41 @@ export default function MultiplayerRace3D() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Passive income generation (CPS) for cookie clicker mode
+  useEffect(() => {
+    if (gameMode !== 'clicker' || gameState !== 'racing') return;
+
+    const cpsInterval = setInterval(() => {
+      setCookies(prevCookies => {
+        let totalCPS = 0;
+        ownedUpgrades.forEach((count, upgradeId) => {
+          const upgrade = UPGRADES.find(u => u.id === upgradeId);
+          if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+            totalCPS += upgrade.cps * count;
+          }
+        });
+
+        if (totalCPS > 0) {
+          const newCookies = prevCookies + totalCPS;
+          setMyScore(newCookies);
+          
+          if (socketRef.current && roomCodeRef.current) {
+            socketRef.current.emit('update-score', { 
+              roomCode: roomCodeRef.current, 
+              score: newCookies 
+            });
+          }
+          
+          return newCookies;
+        }
+        
+        return prevCookies;
+      });
+    }, 1000); // Run every second
+
+    return () => clearInterval(cpsInterval);
+  }, [gameMode, gameState, ownedUpgrades]);
 
   // Three.js setup
   useEffect(() => {
@@ -720,19 +858,32 @@ export default function MultiplayerRace3D() {
             
             // In clicker mode, count this as a click
             if (gameMode === 'clicker') {
-              const newCount = clickCount + 1;
-              setClickCount(newCount);
+              setClickCount(prev => prev + 1);
               
-              // Update score (every click = 1 point)
-              const newScore = newCount;
-              setMyScore(newScore);
-              
-              if (socketRef.current && roomCodeRef.current) {
-                socketRef.current.emit('update-score', { 
-                  roomCode: roomCodeRef.current, 
-                  score: newScore 
+              // Calculate cookies earned based on multiplier upgrades
+              setCookies(prevCookies => {
+                let multiplier = 1;
+                ownedUpgrades.forEach((count, upgradeId) => {
+                  const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                  if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                    multiplier *= Math.pow(upgrade.multiplier, count);
+                  }
                 });
-              }
+                
+                const cookiesEarned = Math.floor(multiplier);
+                const newCookies = prevCookies + cookiesEarned;
+                
+                // Update score
+                setMyScore(newCookies);
+                if (socketRef.current && roomCodeRef.current) {
+                  socketRef.current.emit('update-score', { 
+                    roomCode: roomCodeRef.current, 
+                    score: newCookies 
+                  });
+                }
+                
+                return newCookies;
+              });
             }
           }
         }
@@ -1225,9 +1376,151 @@ export default function MultiplayerRace3D() {
           <div className="bg-gray-900 border-4 border-cyan-500 rounded-lg p-12 mb-8" style={{ boxShadow: '0 0 30px rgba(0, 245, 255, 0.5)' }}>
             <div className="text-center">
               <div className="text-9xl mb-4 animate-pulse">🍪</div>
-              <p className="text-6xl font-bold text-cyan-400 mb-2">{clickCount}</p>
-              <p className="text-2xl text-gray-400">Total Clicks</p>
+              <p className="text-6xl font-bold text-cyan-400 mb-2">{Math.floor(cookies)}</p>
+              <p className="text-2xl text-gray-400 mb-4">Cookies</p>
+              <p className="text-3xl text-yellow-400 font-bold">
+                {(() => {
+                  let totalCPS = 0;
+                  ownedUpgrades.forEach((count, upgradeId) => {
+                    const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                    if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+                      totalCPS += upgrade.cps * count;
+                    }
+                  });
+                  return totalCPS;
+                })()} CPS
+              </p>
             </div>
+          </div>
+
+          {/* Shop and Upgrades Buttons */}
+          <div className="flex gap-4 mb-4">
+            <button
+              onClick={() => setShowShop(true)}
+              className="px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-lg transition-all text-2xl"
+              style={{ boxShadow: '0 0 20px rgba(34, 197, 94, 0.5)' }}
+            >
+              🏪 Shop
+            </button>
+            <button
+              onClick={() => setShowUpgrades(true)}
+              className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-lg transition-all text-2xl"
+              style={{ boxShadow: '0 0 20px rgba(168, 85, 247, 0.5)' }}
+            >
+              📦 My Upgrades
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Shop Modal - Cookie Clicker */}
+      {showShop && gameMode === 'clicker' && (
+        <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-60 p-8">
+          <div className="bg-gray-900 border-4 border-green-500 rounded-lg p-8 max-w-4xl max-h-[80vh] overflow-y-auto relative" style={{ boxShadow: '0 0 40px rgba(34, 197, 94, 0.7)' }}>
+            <button
+              onClick={() => setShowShop(false)}
+              className="absolute top-4 right-4 text-4xl text-white hover:text-red-500 transition-colors"
+            >
+              ×
+            </button>
+            <h2 className="text-5xl font-bold mb-6 text-green-400 text-center">🏪 Cookie Shop</h2>
+            <div className="grid grid-cols-1 gap-4">
+              {UPGRADES.map((upgrade) => {
+                const owned = ownedUpgrades.get(upgrade.id) || 0;
+                const cost = Math.floor(upgrade.baseCost * Math.pow(1.15, owned));
+                const canAfford = cookies >= cost;
+                
+                return (
+                  <div
+                    key={upgrade.id}
+                    className={`bg-gray-800 border-2 rounded-lg p-4 flex items-center justify-between ${
+                      canAfford ? 'border-green-400' : 'border-gray-600 opacity-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <span className="text-5xl">{upgrade.icon}</span>
+                      <div>
+                        <p className="text-2xl font-bold text-white">{upgrade.name}</p>
+                        <p className="text-lg text-gray-400">{upgrade.description}</p>
+                        {owned > 0 && (
+                          <p className="text-sm text-cyan-400">Owned: {owned}</p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (canAfford) {
+                          setCookies(prev => prev - cost);
+                          setOwnedUpgrades(prev => {
+                            const newMap = new Map(prev);
+                            newMap.set(upgrade.id, (newMap.get(upgrade.id) || 0) + 1);
+                            return newMap;
+                          });
+                        }
+                      }}
+                      disabled={!canAfford}
+                      className={`px-6 py-3 rounded-lg font-bold text-xl transition-all ${
+                        canAfford
+                          ? 'bg-green-600 hover:bg-green-500 text-white cursor-pointer'
+                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      }`}
+                    >
+                      🍪 {cost}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* My Upgrades Modal - Cookie Clicker */}
+      {showUpgrades && gameMode === 'clicker' && (
+        <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-60 p-8">
+          <div className="bg-gray-900 border-4 border-purple-500 rounded-lg p-8 max-w-4xl max-h-[80vh] overflow-y-auto relative" style={{ boxShadow: '0 0 40px rgba(168, 85, 247, 0.7)' }}>
+            <button
+              onClick={() => setShowUpgrades(false)}
+              className="absolute top-4 right-4 text-4xl text-white hover:text-red-500 transition-colors"
+            >
+              ×
+            </button>
+            <h2 className="text-5xl font-bold mb-6 text-purple-400 text-center">📦 My Upgrades</h2>
+            {ownedUpgrades.size === 0 ? (
+              <p className="text-2xl text-gray-400 text-center py-8">You don&apos;t own any upgrades yet!</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {Array.from(ownedUpgrades.entries()).map(([upgradeId, count]) => {
+                  const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                  if (!upgrade) return null;
+                  
+                  let effectText = '';
+                  if (upgrade.type === 'multiplier' && upgrade.multiplier) {
+                    const totalMultiplier = Math.pow(upgrade.multiplier, count);
+                    effectText = `${totalMultiplier}x cookies per click`;
+                  } else if (upgrade.type === 'passive' && upgrade.cps) {
+                    const totalCPS = upgrade.cps * count;
+                    effectText = `+${totalCPS} cookies/sec`;
+                  }
+                  
+                  return (
+                    <div
+                      key={upgradeId}
+                      className="bg-gray-800 border-2 border-purple-400 rounded-lg p-4 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-4">
+                        <span className="text-5xl">{upgrade.icon}</span>
+                        <div>
+                          <p className="text-2xl font-bold text-white">{upgrade.name}</p>
+                          <p className="text-lg text-purple-300">{effectText}</p>
+                          <p className="text-sm text-cyan-400">Owned: {count}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1243,7 +1536,21 @@ export default function MultiplayerRace3D() {
       {/* Scoreboard */}
       <div className="absolute top-4 left-4 bg-black bg-opacity-80 px-4 py-3 rounded-lg border-2 border-cyan-500 z-20">
         {gameMode === 'clicker' && (
-          <p className="text-2xl font-bold text-cyan-400 mb-2">🍪 Cookie Clicker Mode</p>
+          <>
+            <p className="text-2xl font-bold text-cyan-400 mb-2">🍪 Cookie Clicker Mode</p>
+            <p className="text-xl text-yellow-400 font-bold mb-2">
+              CPS: {(() => {
+                let totalCPS = 0;
+                ownedUpgrades.forEach((count, upgradeId) => {
+                  const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                  if (upgrade && upgrade.type === 'passive' && upgrade.cps) {
+                    totalCPS += upgrade.cps * count;
+                  }
+                });
+                return totalCPS;
+              })()}
+            </p>
+          </>
         )}
         {players.map((player) => (
           <p key={player.id} className="text-xl font-bold" style={{ color: player.id === myPlayerId ? '#00f5ff' : '#ffffff' }}>
@@ -1252,7 +1559,10 @@ export default function MultiplayerRace3D() {
           </p>
         ))}
         {gameMode === 'clicker' && myPlayerId && (
-          <p className="text-lg text-cyan-300 mt-2">Clicks: {clickCount}</p>
+          <>
+            <p className="text-lg text-cyan-300 mt-2">Cookies: {Math.floor(cookies)}</p>
+            <p className="text-md text-gray-400">Clicks: {clickCount}</p>
+          </>
         )}
       </div>
       
