@@ -314,6 +314,7 @@ export default function MultiplayerRace3D() {
   const burntCookieActiveRef = useRef(false);
   const burntCookiePopupRef = useRef(false);
   const cloudSabotagePopupRef = useRef(false);
+  const gameOverEmittedRef = useRef(false); // Track if game-over has been emitted
 
   // Init Socket.io
   useEffect(() => {
@@ -422,8 +423,9 @@ export default function MultiplayerRace3D() {
                       timerIntervalRef.current = null;
                     }
                     
-                    // Determine winner based on highest score
-                    if (socketRef.current && roomCodeRef.current) {
+                    // Determine winner based on highest score (only emit once)
+                    if (socketRef.current && roomCodeRef.current && !gameOverEmittedRef.current) {
+                      gameOverEmittedRef.current = true;
                       socketRef.current.emit('game-over', { roomCode: roomCodeRef.current });
                     }
                     
@@ -529,6 +531,24 @@ export default function MultiplayerRace3D() {
         
         return newAlive;
       });
+    });
+
+    newSocket.on('game-over', ({ winner }) => {
+      console.log('Game over! Winner:', winner);
+      
+      // Stop game
+      isGameRunningRef.current = false;
+      gameOverRef.current = true;
+      
+      // Stop timer
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      
+      // Set winner and transition to winner screen
+      setWinner(winner);
+      setGameState('winner');
     });
 
     newSocket.on('return-to-lobby', ({ players }) => {
@@ -998,6 +1018,7 @@ export default function MultiplayerRace3D() {
     setMyScore(0);
     setIsDead(false);
     setRemainingTime(null);
+    gameOverEmittedRef.current = false; // Reset game over flag
     
     // Clear any existing timer
     if (timerIntervalRef.current) {
