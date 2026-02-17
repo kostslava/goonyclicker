@@ -41,7 +41,7 @@ const DIFFICULTY_SETTINGS = {
 
 type Difficulty = keyof typeof DIFFICULTY_SETTINGS;
 type GameMode = 'race' | 'clicker';
-type TimeLimit = 120 | 300 | 600; // 2, 5, or 10 minutes in seconds
+type TimeLimit = 0 | 120 | 300 | 600; // 0 = unlimited, 2, 5, or 10 minutes in seconds
 
 interface Player {
   id: string;
@@ -214,6 +214,7 @@ export default function MultiplayerRace3D() {
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [gameMode, setGameMode] = useState<GameMode>('race');
   const [timeLimit, setTimeLimit] = useState<TimeLimit>(300);
+  const [remainingTime, setRemainingTime] = useState<number | null>(null);
   const [isCreator, setIsCreator] = useState(false);
   const [clickCount, setClickCount] = useState(0);
   const [alivePlayers, setAlivePlayers] = useState<Set<string>>(new Set());
@@ -279,6 +280,7 @@ export default function MultiplayerRace3D() {
   const pipeSpeedRef = useRef(0.08);
   const pipeGapRef = useRef(6);
   const difficultyRef = useRef<Difficulty>('medium');
+  const timeLimitRef = useRef<TimeLimit>(300);
 
   // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -405,6 +407,32 @@ export default function MultiplayerRace3D() {
             isGameRunningRef.current = true;
             // Calculate exact game start time based on server time + countdown duration
             gameStartTimeRef.current = startTime + 3000; // Server time + 3 second countdown
+            
+            // Start timer for cookie clicker mode (if time limit is set)
+            if (gameModeRef.current === 'clicker' && timeLimitRef.current > 0) {
+              setRemainingTime(timeLimitRef.current);
+              if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+              
+              timerIntervalRef.current = setInterval(() => {
+                setRemainingTime(prev => {
+                  if (prev === null || prev <= 1) {
+                    // Time's up!
+                    if (timerIntervalRef.current) {
+                      clearInterval(timerIntervalRef.current);
+                      timerIntervalRef.current = null;
+                    }
+                    
+                    // Determine winner based on highest score
+                    if (socketRef.current && roomCodeRef.current) {
+                      socketRef.current.emit('game-over', { roomCode: roomCodeRef.current });
+                    }
+                    
+                    return 0;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
+            }
             
             return null;
           }
@@ -642,6 +670,7 @@ export default function MultiplayerRace3D() {
   useEffect(() => { burntCookieActiveRef.current = burntCookieActive; }, [burntCookieActive]);
   useEffect(() => { cloudSabotagePopupRef.current = cloudSabotagePopup; }, [cloudSabotagePopup]);
   useEffect(() => { burntCookiePopupRef.current = burntCookiePopup; }, [burntCookiePopup]);
+  useEffect(() => { timeLimitRef.current = timeLimit; }, [timeLimit]);
 
   // Random event system - triggers special events during gameplay
   useEffect(() => {
@@ -968,6 +997,13 @@ export default function MultiplayerRace3D() {
     lastFrameTimeRef.current = 0;
     setMyScore(0);
     setIsDead(false);
+    setRemainingTime(null);
+    
+    // Clear any existing timer
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
     
     // Reset bird visual state
     if (birdRef.current) {
@@ -1763,6 +1799,7 @@ export default function MultiplayerRace3D() {
                     onChange={(e) => setTimeLimit(Number(e.target.value) as TimeLimit)}
                     className="w-full px-4 py-3 bg-gray-900 border-2 border-pink-500 rounded-lg text-white focus:outline-none"
                   >
+                    <option value="0">Unlimited</option>
                     <option value="120">2 Minutes</option>
                     <option value="300">5 Minutes</option>
                     <option value="600">10 Minutes</option>
@@ -1939,6 +1976,11 @@ export default function MultiplayerRace3D() {
               <span className="text-white font-bold">Smash</span> (Large Downward Motion)
               <span className="mx-2 text-gray-500">|</span>
               <span className="text-white font-bold">Roll</span> (Left/Right)
+              {remainingTime !== null && remainingTime > 0 && (
+                <span className="ml-2 text-yellow-400 font-bold">
+                  ⏱️ {Math.floor(remainingTime / 60)}:{(remainingTime % 60).toString().padStart(2, '0')}
+                </span>
+              )}
               {heatMultiplier > 1 && (
                 <span className="ml-2 text-orange-400 font-bold">🔥 {heatMultiplier.toFixed(1)}x Heat</span>
               )}
@@ -1959,6 +2001,11 @@ export default function MultiplayerRace3D() {
             <h1 className="text-6xl font-bold mb-4" style={{ textShadow: '0 0 20px #00f5ff' }}>
               {doughPhaseActive ? '🫘 Rolling Dough!' : '🍪 Cookie Clicker'}
             </h1>
+            {remainingTime !== null && remainingTime > 0 && (
+              <div className="text-4xl font-bold text-yellow-400 mb-2">
+                ⏱️ {Math.floor(remainingTime / 60)}:{(remainingTime % 60).toString().padStart(2, '0')}
+              </div>
+            )}
             <p className="text-3xl text-cyan-400 mb-2">
               {doughPhaseActive ? 'Move hand LEFT/RIGHT to roll!' : 'Move your hand up & down to click!'}
             </p>
