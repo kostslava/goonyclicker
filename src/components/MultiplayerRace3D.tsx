@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
-const MOVEMENT_THRESHOLD = 0.08;
-const MOVEMENT_COOLDOWN = 500; // milliseconds between reps
+const HAND_UP_THRESHOLD = 0.45; // When hand Y is below this, consider it "up"
+const HAND_DOWN_THRESHOLD = 0.65; // When hand Y is above this, consider it "down"
+const MOVEMENT_COOLDOWN = 400; // milliseconds between reps
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
 const CEILING_LEVEL = 15;
@@ -178,6 +179,7 @@ export default function MultiplayerRace3D() {
   const [showShop, setShowShop] = useState(false);
   const [showUpgrades, setShowUpgrades] = useState(false);
   const [cookieCrumbles, setCookieCrumbles] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  const [currentHandY, setCurrentHandY] = useState<number | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -222,7 +224,7 @@ export default function MultiplayerRace3D() {
   const lastObstacleZRef = useRef(-25);
   const spectatingRef = useRef(false);
   const lastRepTimeRef = useRef<number>(0);
-  const handDirectionRef = useRef<'up' | 'down' | null>(null);
+  const handPositionRef = useRef<'up' | 'down' | 'middle'>(null);
 
   // Init Socket.io
   useEffect(() => {
@@ -855,69 +857,87 @@ export default function MultiplayerRace3D() {
         const handY = wrist.y;
         const now = Date.now();
         
-        if (lastHandYRef.current !== null) {
-          const deltaY = handY - lastHandYRef.current;
+        // Update state for UI indicator
+        setCurrentHandY(handY);
+        
+        console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameMode);
+        
+        // Determine current hand position based on thresholds
+        let currentPosition: 'up' | 'down' | 'middle' = 'middle';
+        if (handY < HAND_UP_THRESHOLD) {
+          currentPosition = 'up';
+          console.log('✋ Hand is UP (Y < 0.45)');
+        } else if (handY > HAND_DOWN_THRESHOLD) {
+          currentPosition = 'down';
+          console.log('✋ Hand is DOWN (Y > 0.65)');
+        }
+        
+        // Detect a complete rep when hand crosses from one extreme to the other
+        const lastPosition = handPositionRef.current;
+        if (lastPosition && lastPosition !== 'middle' && currentPosition !== 'middle' && lastPosition !== currentPosition) {
+          const timeSinceLastRep = now - lastRepTimeRef.current;
           
-          // Track hand direction
-          if (Math.abs(deltaY) > MOVEMENT_THRESHOLD) {
-            const newDirection = deltaY < 0 ? 'up' : 'down';
+          if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
+            console.log('🎉 REP COMPLETED!', { from: lastPosition, to: currentPosition, handY: handY.toFixed(3) });
+            lastRepTimeRef.current = now;
             
-            // Detect a complete rep (up then down or down then up)
-            if (handDirectionRef.current && handDirectionRef.current !== newDirection) {
-              // Direction changed - this is a rep!
-              const timeSinceLastRep = now - lastRepTimeRef.current;
+            // In clicker mode, count this as a click
+            if (gameMode === 'clicker') {
+              setClickCount(prev => {
+                console.log('🍪 Click count:', prev + 1);
+                return prev + 1;
+              });
               
-              if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
-                console.log('REP COMPLETED!', { direction: handDirectionRef.current, newDirection, deltaY });
-                lastRepTimeRef.current = now;
+              // Calculate cookies earned based on multiplier upgrades
+              setCookies(prevCookies => {
+                let multiplier = 1;
+                ownedUpgrades.forEach((count, upgradeId) => {
+                  const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                  if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                    multiplier *= Math.pow(upgrade.multiplier, count);
+                  }
+                });
                 
-                // In clicker mode, count this as a click
-                if (gameMode === 'clicker') {
-                  setClickCount(prev => prev + 1);
-                  
-                  // Calculate cookies earned based on multiplier upgrades
-                  setCookies(prevCookies => {
-                    let multiplier = 1;
-                    ownedUpgrades.forEach((count, upgradeId) => {
-                      const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                      if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                        multiplier *= Math.pow(upgrade.multiplier, count);
-                      }
-                    });
-                    
-                    const cookiesEarned = Math.floor(multiplier);
-                    const newCookies = prevCookies + cookiesEarned;
-                    
-                    // Update score
-                    setMyScore(newCookies);
-                    if (socketRef.current && roomCodeRef.current) {
-                      socketRef.current.emit('update-score', { 
-                        roomCode: roomCodeRef.current, 
-                        score: newCookies 
-                      });
-                    }
-                    
-                    // Trigger cookie crumble animation
-                    const crumbleId = Date.now();
-                    setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
-                    setTimeout(() => {
-                      setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
-                    }, 1000);
-                    
-                    return newCookies;
+                const cookiesEarned = Math.floor(multiplier);
+                const newCookies = prevCookies + cookiesEarned;
+                console.log('🍪 Cookies earned:', cookiesEarned, '| Total:', newCookies);
+                
+                // Update score
+                setMyScore(newCookies);
+                if (socketRef.current && roomCodeRef.current) {
+                  socketRef.current.emit('update-score', { 
+                    roomCode: roomCodeRef.current, 
+                    score: newCookies 
                   });
-                } else if (gameMode === 'race') {
-                  // In race mode, trigger flap
-                  birdVelocityRef.current = flapStrengthRef.current;
                 }
-              }
+                
+                // Trigger cookie crumble animation
+                const crumbleId = Date.now();
+                setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
+                setTimeout(() => {
+                  setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
+                }, 1000);
+                
+                return newCookies;
+              });
+            } else if (gameMode === 'race') {
+              // In race mode, trigger flap
+              birdVelocityRef.current = flapStrengthRef.current;
             }
-            
-            handDirectionRef.current = newDirection;
+          } else {
+            console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
           }
         }
         
+        // Update position reference
+        if (currentPosition !== 'middle') {
+          handPositionRef.current = currentPosition;
+        }
+        
         lastHandYRef.current = handY;
+      } else {
+        console.log('❌ No hand detected');
+        setCurrentHandY(null);
       }
     }
     
@@ -1449,6 +1469,32 @@ export default function MultiplayerRace3D() {
                   return totalCPS;
                 })()} CPS
               </p>
+              
+              {/* Hand Position Indicator */}
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <p className="text-sm text-gray-500 mb-1">Hand Status</p>
+                <p className="text-2xl font-bold">
+                  {currentHandY !== null ? (
+                    <>
+                      {currentHandY < HAND_UP_THRESHOLD ? (
+                        <span className="text-green-400">✋ UP</span>
+                      ) : currentHandY > HAND_DOWN_THRESHOLD ? (
+                        <span className="text-blue-400">👇 DOWN</span>
+                      ) : (
+                        <span className="text-gray-400">➡️ MIDDLE</span>
+                      )}
+                      <span className="text-sm text-gray-500 ml-2">
+                        ({currentHandY.toFixed(2)})
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-red-400">❌ No Hand</span>
+                  )}
+                </p>
+                <p className="text-xs text-gray-600 mt-1">
+                  Move hand: UP &lt; {HAND_UP_THRESHOLD} | DOWN &gt; {HAND_DOWN_THRESHOLD}
+                </p>
+              </div>
             </div>
           </div>
 
