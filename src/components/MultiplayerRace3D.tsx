@@ -820,7 +820,8 @@ export default function MultiplayerRace3D() {
       }
       
       // Only update game physics when game is actually running (after countdown)
-      if (isGameRunningRef.current) {
+      // BUT in clicker mode, we need to process hands even during countdown
+      if (isGameRunningRef.current || gameMode === 'clicker') {
         updateGame(deltaTime);
       }
       
@@ -840,118 +841,131 @@ export default function MultiplayerRace3D() {
   };
 
   const updateGame = (deltaTime: number) => {
-    if (!birdRef.current || !sceneRef.current || !cameraRef.current) return;
+    // In clicker mode, we don't need the 3D scene
+    if (gameMode === 'race' && (!birdRef.current || !sceneRef.current || !cameraRef.current)) {
+      return;
+    }
     
     // Target 60 FPS as baseline (deltaTime will be ~0.0167 at 60fps)
     const timeScale = deltaTime * 60; // Normalize to 60 FPS
     
+    // Always check for hand detection results first (before any condition)
+    const results = detectionResultsRef.current;
+    const hasHandDetected = !!(results?.landmarks && results.landmarks.length > 0);
+    
+    console.log('🔍 Update Check:', {
+      hasHandDetected,
+      gameMode,
+      gameOverRef: gameOverRef.current,
+      isGameRunningRef: isGameRunningRef.current
+    });
+    
     // Hand tracking for both modes (race needs game running, clicker doesn't)
     const shouldProcessHands = gameMode === 'clicker' ? !gameOverRef.current : (!gameOverRef.current && isGameRunningRef.current);
     
-    if (shouldProcessHands) {
-      // Use cached hand detection results (detection runs once per frame in game loop)
-      const results = detectionResultsRef.current;
-      if (results?.landmarks && results.landmarks.length > 0) {
-        const hand = results.landmarks[0];
-        const wrist = hand[0];
-        const handY = wrist.y;
-        const now = Date.now();
+    console.log('✅ Should process hands:', shouldProcessHands);
+    
+    if (shouldProcessHands && hasHandDetected && results?.landmarks) {
+      const hand = results.landmarks[0];
+      const wrist = hand[0];
+      const handY = wrist.y;
+      const now = Date.now();
+      
+      // Update state for UI indicator IMMEDIATELY
+      setCurrentHandY(handY);
+      console.log('💾 State updated! handY =', handY.toFixed(3));
+      
+      console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameMode);
+      
+      // Determine current hand position based on thresholds
+      let currentPosition: 'up' | 'down' | 'middle' = 'middle';
+      if (handY < HAND_UP_THRESHOLD) {
+        currentPosition = 'up';
+        console.log('✋ Hand is UP (Y < 0.45)');
+      } else if (handY > HAND_DOWN_THRESHOLD) {
+        currentPosition = 'down';
+        console.log('✋ Hand is DOWN (Y > 0.65)');
+      }
+      
+      // Detect a complete rep when hand crosses from one extreme to the other
+      const lastPosition = handPositionRef.current;
+      if (lastPosition && lastPosition !== 'middle' && currentPosition !== 'middle' && lastPosition !== currentPosition) {
+        const timeSinceLastRep = now - lastRepTimeRef.current;
         
-        // Update state for UI indicator
-        setCurrentHandY(handY);
-        
-        console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameMode);
-        
-        // Determine current hand position based on thresholds
-        let currentPosition: 'up' | 'down' | 'middle' = 'middle';
-        if (handY < HAND_UP_THRESHOLD) {
-          currentPosition = 'up';
-          console.log('✋ Hand is UP (Y < 0.45)');
-        } else if (handY > HAND_DOWN_THRESHOLD) {
-          currentPosition = 'down';
-          console.log('✋ Hand is DOWN (Y > 0.65)');
-        }
-        
-        // Detect a complete rep when hand crosses from one extreme to the other
-        const lastPosition = handPositionRef.current;
-        if (lastPosition && lastPosition !== 'middle' && currentPosition !== 'middle' && lastPosition !== currentPosition) {
-          const timeSinceLastRep = now - lastRepTimeRef.current;
+        if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
+          console.log('🎉 REP COMPLETED!', { from: lastPosition, to: currentPosition, handY: handY.toFixed(3) });
+          lastRepTimeRef.current = now;
           
-          if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
-            console.log('🎉 REP COMPLETED!', { from: lastPosition, to: currentPosition, handY: handY.toFixed(3) });
-            lastRepTimeRef.current = now;
+          // In clicker mode, count this as a click
+          if (gameMode === 'clicker') {
+            setClickCount(prev => {
+              console.log('🍪 Click count:', prev + 1);
+              return prev + 1;
+            });
             
-            // In clicker mode, count this as a click
-            if (gameMode === 'clicker') {
-              setClickCount(prev => {
-                console.log('🍪 Click count:', prev + 1);
-                return prev + 1;
+            // Calculate cookies earned based on multiplier upgrades
+            setCookies(prevCookies => {
+              let multiplier = 1;
+              ownedUpgrades.forEach((count, upgradeId) => {
+                const upgrade = UPGRADES.find(u => u.id === upgradeId);
+                if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
+                  multiplier *= Math.pow(upgrade.multiplier, count);
+                }
               });
               
-              // Calculate cookies earned based on multiplier upgrades
-              setCookies(prevCookies => {
-                let multiplier = 1;
-                ownedUpgrades.forEach((count, upgradeId) => {
-                  const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                  if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                    multiplier *= Math.pow(upgrade.multiplier, count);
-                  }
+              const cookiesEarned = Math.floor(multiplier);
+              const newCookies = prevCookies + cookiesEarned;
+              console.log('🍪 Cookies earned:', cookiesEarned, '| Total:', newCookies);
+              
+              // Update score
+              setMyScore(newCookies);
+              if (socketRef.current && roomCodeRef.current) {
+                socketRef.current.emit('update-score', { 
+                  roomCode: roomCodeRef.current, 
+                  score: newCookies 
                 });
-                
-                const cookiesEarned = Math.floor(multiplier);
-                const newCookies = prevCookies + cookiesEarned;
-                console.log('🍪 Cookies earned:', cookiesEarned, '| Total:', newCookies);
-                
-                // Update score
-                setMyScore(newCookies);
-                if (socketRef.current && roomCodeRef.current) {
-                  socketRef.current.emit('update-score', { 
-                    roomCode: roomCodeRef.current, 
-                    score: newCookies 
-                  });
-                }
-                
-                // Trigger cookie crumble animation
-                const crumbleId = Date.now();
-                setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
-                setTimeout(() => {
-                  setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
-                }, 1000);
-                
-                return newCookies;
-              });
-            } else if (gameMode === 'race') {
-              // In race mode, trigger flap
-              birdVelocityRef.current = flapStrengthRef.current;
-            }
-          } else {
-            console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
+              }
+              
+              // Trigger cookie crumble animation
+              const crumbleId = Date.now();
+              setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
+              setTimeout(() => {
+                setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
+              }, 1000);
+              
+              return newCookies;
+            });
+          } else if (gameMode === 'race') {
+            // In race mode, trigger flap
+            birdVelocityRef.current = flapStrengthRef.current;
           }
+        } else {
+          console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
         }
-        
-        // Update position reference
-        if (currentPosition !== 'middle') {
-          handPositionRef.current = currentPosition;
-        }
-        
-        lastHandYRef.current = handY;
-      } else {
-        console.log('❌ No hand detected');
-        setCurrentHandY(null);
       }
+      
+      // Update position reference
+      if (currentPosition !== 'middle') {
+        handPositionRef.current = currentPosition;
+      }
+      
+      lastHandYRef.current = handY;
+    } else {
+      console.log('❌ No hand detected in this frame');
+      setCurrentHandY(null);
     }
     
     // Only process player physics and input if player is alive AND game is running
     if (!gameOverRef.current && isGameRunningRef.current) {
       
       // Bird physics - only in race mode
-      if (gameMode === 'race') {
+      if (gameMode === 'race' && birdRef.current) {
         birdVelocityRef.current += gravityRef.current * timeScale;
         birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
         birdRef.current.position.y = birdYRef.current;
         birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
       }
-    } else if (gameOverRef.current && gameMode === 'race') {
+    } else if (gameOverRef.current && gameMode === 'race' && birdRef.current) {
       // Death animation - make bird fall and fade
       birdVelocityRef.current += gravityRef.current * 1.5 * timeScale; // Fall faster when dead
       birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
@@ -970,7 +984,7 @@ export default function MultiplayerRace3D() {
     }
     
     // Position bird horizontally based on player index - RACE MODE ONLY
-    if (gameMode === 'race') {
+    if (gameMode === 'race' && birdRef.current) {
       const playerIndex = players.findIndex(p => p.id === myPlayerId);
       const numPlayers = players.length;
       const spacing = 6; // Spacing between birds on X axis
@@ -980,8 +994,8 @@ export default function MultiplayerRace3D() {
       birdRef.current.position.z = 0; // Keep all birds at same depth
     }
     
-    // Ensure bird stays at Y=0 during countdown (when game not running)
-    if (!isGameRunningRef.current && !gameOverRef.current) {
+    // Ensure bird stays at Y=0 during countdown (when game not running) - RACE MODE ONLY
+    if (!isGameRunningRef.current && !gameOverRef.current && gameMode === 'race' && birdRef.current) {
       birdRef.current.position.y = 0;
       birdYRef.current = 0;
       birdVelocityRef.current = 0;
@@ -1140,7 +1154,7 @@ export default function MultiplayerRace3D() {
         }
         
         // Collision check (only for alive players)
-        if (!gameOverRef.current && pipe.z > -2.5 && pipe.z < 2.5) {
+        if (!gameOverRef.current && pipe.z > -2.5 && pipe.z < 2.5 && birdRef.current) {
           const BIRD_RADIUS = 0.8;
           const birdX = birdRef.current.position.x;
           const birdY = birdYRef.current;
