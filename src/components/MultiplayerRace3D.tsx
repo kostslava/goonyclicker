@@ -912,57 +912,11 @@ export default function MultiplayerRace3D() {
         
         // Detect significant upward movement (Y decreasing)
         if (deltaY < -0.005) { // Moving up (smaller threshold for smoother detection)
-          // If we were going down and now moved up significantly from that low point, count a rep
+          // If we were going down and now moved up significantly, just track state (no rep counted)
           if (handPositionRef.current === 'down' && peakHandYRef.current !== null && (peakHandYRef.current - handY) > MOVEMENT_THRESHOLD) {
-            const timeSinceLastRep = now - lastRepTimeRef.current;
-            
-            if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
-              console.log('🎉 REP COMPLETED! DOWN→UP, moved', (peakHandYRef.current - handY).toFixed(3));
-              lastRepTimeRef.current = now;
-              handPositionRef.current = 'up';
-              peakHandYRef.current = handY;
-              
-              // Count the rep
-              if (gameModeRef.current === 'clicker') {
-                setClickCount(prev => prev + 1);
-                
-                // Calculate cookies earned
-                setCookies(prevCookies => {
-                  let multiplier = 1;
-                  ownedUpgradesRef.current.forEach((count, upgradeId) => {
-                    const upgrade = UPGRADES.find(u => u.id === upgradeId);
-                    if (upgrade && upgrade.type === 'multiplier' && upgrade.multiplier) {
-                      multiplier *= Math.pow(upgrade.multiplier, count);
-                    }
-                  });
-                  
-                  const cookiesEarned = Math.floor(multiplier);
-                  const newCookies = prevCookies + cookiesEarned;
-                  console.log('💰 Multiplier:', multiplier, '| Cookies earned:', cookiesEarned, '| Total:', newCookies);
-                  
-                  setMyScore(newCookies);
-                  if (socketRef.current && roomCodeRef.current) {
-                    socketRef.current.emit('update-score', { 
-                      roomCode: roomCodeRef.current, 
-                      score: newCookies 
-                    });
-                  }
-                  
-                  // Trigger cookie crumble animation
-                  const crumbleId = Date.now();
-                  setCookieCrumbles(prev => [...prev, { id: crumbleId, x: wrist.x, y: wrist.y }]);
-                  setTimeout(() => {
-                    setCookieCrumbles(prev => prev.filter(c => c.id !== crumbleId));
-                  }, 1000);
-                  
-                  return newCookies;
-                });
-              } else if (gameModeRef.current === 'race') {
-                birdVelocityRef.current = flapStrengthRef.current;
-              }
-            } else {
-              console.log('⏱️ Too soon! Wait', (MOVEMENT_COOLDOWN - timeSinceLastRep).toFixed(0), 'ms');
-            }
+            console.log('⬆️ Hand moved UP (preparing for down stroke)');
+            handPositionRef.current = 'up';
+            peakHandYRef.current = handY;
           } else {
             // Still moving up, update peak
             peakHandYRef.current = Math.min(peakHandYRef.current, handY);
@@ -973,12 +927,12 @@ export default function MultiplayerRace3D() {
         }
         // Detect significant downward movement (Y increasing)
         else if (deltaY > 0.005) { // Moving down
-          // If we were going up and now moved down significantly from that high point, count a rep
+          // If we were going up and now moved down significantly from that high point, count a rep (ONLY DOWN COUNTS!)
           if (handPositionRef.current === 'up' && peakHandYRef.current !== null && (handY - peakHandYRef.current) > MOVEMENT_THRESHOLD) {
             const timeSinceLastRep = now - lastRepTimeRef.current;
             
             if (timeSinceLastRep >= MOVEMENT_COOLDOWN) {
-              console.log('🎉 REP COMPLETED! UP→DOWN, moved', (handY - peakHandYRef.current).toFixed(3));
+              console.log('🎉 REP COMPLETED! ⬇️ DOWN STROKE = COOKIE! Moved', (handY - peakHandYRef.current).toFixed(3));
               lastRepTimeRef.current = now;
               handPositionRef.current = 'down';
               peakHandYRef.current = handY;
