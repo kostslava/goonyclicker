@@ -189,6 +189,7 @@ export default function MultiplayerRace3D() {
   } | null>(null);
   const lastHandYRef = useRef<number | null>(null);
   const detectionResultsRef = useRef<{ landmarks?: Array<Array<{ x: number; y: number; z: number }>> } | null>(null);
+  const gameModeRef = useRef<GameMode>('race');
   const animationFrameRef = useRef<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const roomCodeRef = useRef<string>('');
@@ -516,6 +517,11 @@ export default function MultiplayerRace3D() {
     return () => clearInterval(cpsInterval);
   }, [gameMode, gameState, ownedUpgrades]);
 
+  // Sync gameModeRef with gameMode state for use in game loop closures
+  useEffect(() => {
+    gameModeRef.current = gameMode;
+  }, [gameMode]);
+
   // Three.js setup
   useEffect(() => {
     if (gameState !== 'racing' || !containerRef.current) return;
@@ -782,7 +788,7 @@ export default function MultiplayerRace3D() {
     
     // Pre-create first 30 pipes (reduced from 50 for performance) - ONLY IN RACE MODE
     // Use deterministic seeds for consistent obstacle placement across all clients
-    if (gameMode === 'race') {
+    if (gameModeRef.current === 'race') {
       const playerIndex = players.findIndex(p => p.id === myPlayerId);
       const numPlayers = players.length;
       const spacing = 6;
@@ -824,7 +830,7 @@ export default function MultiplayerRace3D() {
       
       // Only update game physics when game is actually running (after countdown)
       // BUT in clicker mode, we need to process hands even during countdown
-      if (isGameRunningRef.current || gameMode === 'clicker') {
+      if (isGameRunningRef.current || gameModeRef.current === 'clicker') {
         updateGame(deltaTime);
       }
       
@@ -845,7 +851,7 @@ export default function MultiplayerRace3D() {
 
   const updateGame = (deltaTime: number) => {
     // In clicker mode, we don't need the 3D scene
-    if (gameMode === 'race' && (!birdRef.current || !sceneRef.current || !cameraRef.current)) {
+    if (gameModeRef.current === 'race' && (!birdRef.current || !sceneRef.current || !cameraRef.current)) {
       return;
     }
     
@@ -862,13 +868,13 @@ export default function MultiplayerRace3D() {
       hasLandmarks: !!(results?.landmarks && results.landmarks.length > 0),
       numLandmarks: results?.landmarks?.[0]?.length || 0,
       hasValidHand,
-      gameMode,
+      gameMode: gameModeRef.current,
       gameOverRef: gameOverRef.current,
       isGameRunningRef: isGameRunningRef.current
     });
     
     // Hand tracking for both modes (race needs game running, clicker doesn't)
-    const shouldProcessHands = gameMode === 'clicker' ? !gameOverRef.current : (!gameOverRef.current && isGameRunningRef.current);
+    const shouldProcessHands = gameModeRef.current === 'clicker' ? !gameOverRef.current : (!gameOverRef.current && isGameRunningRef.current);
     
     console.log('✅ Should process hands:', shouldProcessHands, '| Valid hand:', hasValidHand);
     
@@ -882,7 +888,7 @@ export default function MultiplayerRace3D() {
       setCurrentHandY(handY);
       console.log('💾 State updated! handY =', handY.toFixed(3), '| Landmarks:', hand.length);
       
-      console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameMode);
+      console.log('🎯 Hand Y:', handY.toFixed(3), '| Position:', handPositionRef.current, '| Mode:', gameModeRef.current);
       
       // Determine current hand position based on thresholds
       let currentPosition: 'up' | 'down' | 'middle' = 'middle';
@@ -904,7 +910,7 @@ export default function MultiplayerRace3D() {
           lastRepTimeRef.current = now;
           
           // In clicker mode, count this as a click
-          if (gameMode === 'clicker') {
+          if (gameModeRef.current === 'clicker') {
             setClickCount(prev => {
               console.log('🍪 Click count:', prev + 1);
               return prev + 1;
@@ -942,7 +948,7 @@ export default function MultiplayerRace3D() {
               
               return newCookies;
             });
-          } else if (gameMode === 'race') {
+          } else if (gameModeRef.current === 'race') {
             // In race mode, trigger flap
             birdVelocityRef.current = flapStrengthRef.current;
           }
@@ -974,13 +980,13 @@ export default function MultiplayerRace3D() {
     if (!gameOverRef.current && isGameRunningRef.current) {
       
       // Bird physics - only in race mode
-      if (gameMode === 'race' && birdRef.current) {
+      if (gameModeRef.current === 'race' && birdRef.current) {
         birdVelocityRef.current += gravityRef.current * timeScale;
         birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
         birdRef.current.position.y = birdYRef.current;
         birdRef.current.rotation.x = Math.max(-0.5, Math.min(0.5, -birdVelocityRef.current * 0.05));
       }
-    } else if (gameOverRef.current && gameMode === 'race' && birdRef.current) {
+    } else if (gameOverRef.current && gameModeRef.current === 'race' && birdRef.current) {
       // Death animation - make bird fall and fade
       birdVelocityRef.current += gravityRef.current * 1.5 * timeScale; // Fall faster when dead
       birdYRef.current += birdVelocityRef.current * 0.01 * timeScale;
@@ -1259,7 +1265,7 @@ export default function MultiplayerRace3D() {
     }
     
     // Draw cookie crumbles animation
-    if (gameMode === 'clicker' && cookieCrumbles.length > 0) {
+    if (gameModeRef.current === 'clicker' && cookieCrumbles.length > 0) {
       cookieCrumbles.forEach(crumble => {
         const x = canvas.width - (crumble.x * canvas.width);
         const y = crumble.y * canvas.height;
