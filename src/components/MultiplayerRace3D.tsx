@@ -5,7 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
 const MOVEMENT_THRESHOLD = 0.01; // Minimum Y change to register as movement (~5 pixels on 480px canvas)
-const MOVEMENT_COOLDOWN = 400; // milliseconds between reps
+const MOVEMENT_COOLDOWN = 50; // milliseconds between reps (minimal delay to allow spam)
 const PIPE_WIDTH = 6;
 const GROUND_LEVEL = -5;
 const CEILING_LEVEL = 15;
